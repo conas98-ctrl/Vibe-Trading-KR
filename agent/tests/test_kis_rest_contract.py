@@ -39,6 +39,8 @@ class _KisClient:
         self.calls.append({"method": "POST", "path": path, "json": json, "headers": headers or {}})
         if path == "/oauth2/tokenP":
             return _Response({"access_token": "token-123", "access_token_token_expired": "29991231235959"})
+        if path == "/oauth2/Approval":
+            return _Response({"approval_key": "approval-123"})
         if path == "/uapi/hashkey":
             return _Response({"HASH": "hash-123"})
         if path == "/uapi/domestic-stock/v1/trading/order-cash":
@@ -127,6 +129,7 @@ def _cfg(profile="paper") -> KoreanConnectorConfig:
 
 
 def test_kis_catalog_matches_official_domestic_stock_samples() -> None:
+    assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["websocket_approval"]["path"] == "/oauth2/Approval"
     assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["inquire_price"]["path"] == (
         "/uapi/domestic-stock/v1/quotations/inquire-price"
     )
@@ -139,6 +142,100 @@ def test_kis_catalog_matches_official_domestic_stock_samples() -> None:
     assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["inquire_psbl_rvsecncl"]["tr_id"] == "TTTC0084R"
     assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["order_cash"]["paper_buy_tr_id"] == "VTTC0012U"
     assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["order_cash"]["live_sell_tr_id"] == "TTTC0011U"
+
+
+def test_kis_websocket_catalog_matches_official_domestic_stock_samples() -> None:
+    assert kis.KIS_WEBSOCKET_URLS == {
+        "paper": "ws://ops.koreainvestment.com:31000",
+        "live": "ws://ops.koreainvestment.com:21000",
+    }
+    assert kis.KIS_WEBSOCKET_CHANNELS["asking_price_krx"]["tr_id"] == "H0STASP0"
+    assert kis.KIS_WEBSOCKET_CHANNELS["asking_price_nxt"]["tr_id"] == "H0NXASP0"
+    assert kis.KIS_WEBSOCKET_CHANNELS["asking_price_total"]["tr_id"] == "H0UNASP0"
+    assert kis.KIS_WEBSOCKET_CHANNELS["ccnl_krx"]["tr_id"] == "H0STCNT0"
+    assert kis.KIS_WEBSOCKET_CHANNELS["ccnl_nxt"]["tr_id"] == "H0NXCNT0"
+    assert kis.KIS_WEBSOCKET_CHANNELS["ccnl_total"]["tr_id"] == "H0UNCNT0"
+    assert kis.KIS_WEBSOCKET_CHANNELS["ccnl_notice"]["live_tr_id"] == "H0STCNI0"
+    assert kis.KIS_WEBSOCKET_CHANNELS["ccnl_notice"]["paper_tr_id"] == "H0STCNI9"
+    assert kis.KIS_WEBSOCKET_CHANNELS["program_trade_total"]["tr_id"] == "H0UNPGM0"
+
+
+def test_kis_websocket_approval_posts_official_approval_contract() -> None:
+    client = _KisClient()
+    approval_key = kis.issue_websocket_approval_key(_cfg(), client=client)
+    assert approval_key == "approval-123"
+
+    call = client.calls[-1]
+    assert call["path"] == "/oauth2/Approval"
+    assert call["json"] == {
+        "grant_type": "client_credentials",
+        "appkey": "app-key",
+        "secretkey": "app-secret",
+    }
+    assert call["headers"]["Content-Type"] == "application/json"
+
+
+def test_kis_websocket_url_and_subscribe_message_shape() -> None:
+    assert kis.websocket_url(_cfg()) == "ws://ops.koreainvestment.com:31000"
+    assert kis.websocket_url(_cfg(profile="live")) == "ws://ops.koreainvestment.com:21000"
+
+    msg = kis.build_websocket_subscribe_message(
+        "005930.KS",
+        channel="ccnl_krx",
+        approval_key="approval-123",
+        config=_cfg(),
+    )
+    assert msg == {
+        "header": {
+            "content-type": "utf-8",
+            "approval_key": "approval-123",
+            "tr_type": "1",
+            "custtype": "P",
+        },
+        "body": {"input": {"tr_id": "H0STCNT0", "tr_key": "005930"}},
+    }
+
+    notice = kis.build_websocket_subscribe_message(
+        "MYHTSID",
+        channel="ccnl_notice",
+        approval_key="approval-123",
+        config=_cfg(),
+    )
+    assert notice["body"]["input"] == {"tr_id": "H0STCNI9", "tr_key": "MYHTSID"}
+
+    live_notice = kis.build_websocket_subscribe_message(
+        "MYHTSID",
+        channel="ccnl_notice",
+        approval_key="approval-123",
+        config=_cfg(profile="live"),
+    )
+    assert live_notice["body"]["input"]["tr_id"] == "H0STCNI0"
+
+
+def test_kis_parse_websocket_trade_and_system_frames() -> None:
+    trade = kis.parse_websocket_message(
+        "0|H0STCNT0|001|005930^153000^70000^2^1000^1.45^69500^69000^71000^68000^70100^70000^15",
+        channel="ccnl_krx",
+    )
+    assert trade["type"] == "data"
+    assert trade["tr_id"] == "H0STCNT0"
+    assert trade["fields"]["MKSC_SHRN_ISCD"] == "005930"
+    assert trade["event"]["symbol"] == "005930"
+    assert trade["event"]["last"] == 70000.0
+    assert trade["event"]["trade_volume"] == 15.0
+
+    system = kis.parse_websocket_message(
+        (
+            '{"header":{"tr_id":"H0STCNI9","tr_key":"MYHTSID","encrypt":"Y"},'
+            '"body":{"rt_cd":"0","msg1":"SUBSCRIBE SUCCESS","output":{"iv":"iv-123","key":"key-123"}}}'
+        )
+    )
+    assert system["type"] == "system"
+    assert system["status"] == "ok"
+    assert system["tr_id"] == "H0STCNI9"
+    assert system["encrypted"] is True
+    assert system["iv"] == "iv-123"
+    assert system["key"] == "key-123"
 
 
 def test_kis_quote_requests_token_and_official_quote_endpoint() -> None:

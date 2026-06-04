@@ -8,6 +8,7 @@ contract.
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping
@@ -29,6 +30,10 @@ LABEL = "KIS Open API"
 CONNECTOR = "kis"
 
 KIS_DOMESTIC_STOCK_ENDPOINTS: dict[str, dict[str, str]] = {
+    "websocket_approval": {
+        "method": "POST",
+        "path": "/oauth2/Approval",
+    },
     "auth_token": {
         "method": "POST",
         "path": "/oauth2/tokenP",
@@ -74,6 +79,192 @@ KIS_DOMESTIC_STOCK_ENDPOINTS: dict[str, dict[str, str]] = {
     },
 }
 
+KIS_WEBSOCKET_URLS: dict[str, str] = {
+    "paper": "ws://ops.koreainvestment.com:31000",
+    "live": "ws://ops.koreainvestment.com:21000",
+}
+
+KIS_WEBSOCKET_CHANNELS: dict[str, dict[str, str]] = {
+    "asking_price_krx": {"tr_id": "H0STASP0", "tr_key": "symbol", "kind": "orderbook"},
+    "asking_price_nxt": {"tr_id": "H0NXASP0", "tr_key": "symbol", "kind": "orderbook"},
+    "asking_price_total": {"tr_id": "H0UNASP0", "tr_key": "symbol", "kind": "orderbook"},
+    "ccnl_krx": {"tr_id": "H0STCNT0", "tr_key": "symbol", "kind": "trade"},
+    "ccnl_notice": {
+        "live_tr_id": "H0STCNI0",
+        "paper_tr_id": "H0STCNI9",
+        "tr_key": "hts_id",
+        "kind": "order_notice",
+        "encrypted": "Y",
+    },
+    "ccnl_nxt": {"tr_id": "H0NXCNT0", "tr_key": "symbol", "kind": "trade"},
+    "ccnl_total": {"tr_id": "H0UNCNT0", "tr_key": "symbol", "kind": "trade"},
+    "exp_ccnl_krx": {"tr_id": "H0STANC0", "tr_key": "symbol", "kind": "expected_trade"},
+    "exp_ccnl_nxt": {"tr_id": "H0NXANC0", "tr_key": "symbol", "kind": "expected_trade"},
+    "exp_ccnl_total": {"tr_id": "H0UNANC0", "tr_key": "symbol", "kind": "expected_trade"},
+    "index_ccnl": {"tr_id": "H0UPCNT0", "tr_key": "index", "kind": "index_trade"},
+    "index_exp_ccnl": {"tr_id": "H0UPANC0", "tr_key": "index", "kind": "index_expected_trade"},
+    "index_program_trade": {"tr_id": "H0UPPGM0", "tr_key": "index", "kind": "index_program_trade"},
+    "market_status_krx": {"tr_id": "H0STMKO0", "tr_key": "symbol", "kind": "market_status"},
+    "market_status_nxt": {"tr_id": "H0NXMKO0", "tr_key": "symbol", "kind": "market_status"},
+    "market_status_total": {"tr_id": "H0UNMKO0", "tr_key": "symbol", "kind": "market_status"},
+    "member_krx": {"tr_id": "H0STMBC0", "tr_key": "symbol", "kind": "member"},
+    "member_nxt": {"tr_id": "H0NXMBC0", "tr_key": "symbol", "kind": "member"},
+    "member_total": {"tr_id": "H0UNMBC0", "tr_key": "symbol", "kind": "member"},
+    "overtime_asking_price_krx": {"tr_id": "H0STOAA0", "tr_key": "symbol", "kind": "orderbook"},
+    "overtime_ccnl_krx": {"tr_id": "H0STOUP0", "tr_key": "symbol", "kind": "trade"},
+    "overtime_exp_ccnl_krx": {"tr_id": "H0STOAC0", "tr_key": "symbol", "kind": "expected_trade"},
+    "program_trade_krx": {"tr_id": "H0STPGM0", "tr_key": "symbol", "kind": "program_trade"},
+    "program_trade_nxt": {"tr_id": "H0NXPGM0", "tr_key": "symbol", "kind": "program_trade"},
+    "program_trade_total": {"tr_id": "H0UNPGM0", "tr_key": "symbol", "kind": "program_trade"},
+}
+
+_KIS_TRADE_COLUMNS = [
+    "MKSC_SHRN_ISCD",
+    "STCK_CNTG_HOUR",
+    "STCK_PRPR",
+    "PRDY_VRSS_SIGN",
+    "PRDY_VRSS",
+    "PRDY_CTRT",
+    "WGHN_AVRG_STCK_PRC",
+    "STCK_OPRC",
+    "STCK_HGPR",
+    "STCK_LWPR",
+    "ASKP1",
+    "BIDP1",
+    "CNTG_VOL",
+    "ACML_VOL",
+    "ACML_TR_PBMN",
+    "SELN_CNTG_CSNU",
+    "SHNU_CNTG_CSNU",
+    "NTBY_CNTG_CSNU",
+    "CTTR",
+    "SELN_CNTG_SMTN",
+    "SHNU_CNTG_SMTN",
+    "CCLD_DVSN",
+    "SHNU_RATE",
+    "PRDY_VOL_VRSS_ACML_VOL_RATE",
+    "OPRC_HOUR",
+    "OPRC_VRSS_PRPR_SIGN",
+    "OPRC_VRSS_PRPR",
+    "HGPR_HOUR",
+    "HGPR_VRSS_PRPR_SIGN",
+    "HGPR_VRSS_PRPR",
+    "LWPR_HOUR",
+    "LWPR_VRSS_PRPR_SIGN",
+    "LWPR_VRSS_PRPR",
+    "BSOP_DATE",
+    "NEW_MKOP_CLS_CODE",
+    "TRHT_YN",
+    "ASKP_RSQN1",
+    "BIDP_RSQN1",
+    "TOTAL_ASKP_RSQN",
+    "TOTAL_BIDP_RSQN",
+    "VOL_TNRT",
+    "PRDY_SMNS_HOUR_ACML_VOL",
+    "PRDY_SMNS_HOUR_ACML_VOL_RATE",
+    "HOUR_CLS_CODE",
+    "MRKT_TRTM_CLS_CODE",
+    "VI_STND_PRC",
+]
+
+_KIS_ORDERBOOK_COLUMNS = [
+    "MKSC_SHRN_ISCD",
+    "BSOP_HOUR",
+    "HOUR_CLS_CODE",
+    "ASKP1",
+    "ASKP2",
+    "ASKP3",
+    "ASKP4",
+    "ASKP5",
+    "ASKP6",
+    "ASKP7",
+    "ASKP8",
+    "ASKP9",
+    "ASKP10",
+    "BIDP1",
+    "BIDP2",
+    "BIDP3",
+    "BIDP4",
+    "BIDP5",
+    "BIDP6",
+    "BIDP7",
+    "BIDP8",
+    "BIDP9",
+    "BIDP10",
+    "ASKP_RSQN1",
+    "ASKP_RSQN2",
+    "ASKP_RSQN3",
+    "ASKP_RSQN4",
+    "ASKP_RSQN5",
+    "ASKP_RSQN6",
+    "ASKP_RSQN7",
+    "ASKP_RSQN8",
+    "ASKP_RSQN9",
+    "ASKP_RSQN10",
+    "BIDP_RSQN1",
+    "BIDP_RSQN2",
+    "BIDP_RSQN3",
+    "BIDP_RSQN4",
+    "BIDP_RSQN5",
+    "BIDP_RSQN6",
+    "BIDP_RSQN7",
+    "BIDP_RSQN8",
+    "BIDP_RSQN9",
+    "BIDP_RSQN10",
+    "TOTAL_ASKP_RSQN",
+    "TOTAL_BIDP_RSQN",
+    "OVTM_TOTAL_ASKP_RSQN",
+    "OVTM_TOTAL_BIDP_RSQN",
+    "ANTC_CNPR",
+    "ANTC_CNQN",
+    "ANTC_VOL",
+    "ANTC_CNTG_VRSS",
+    "ANTC_CNTG_VRSS_SIGN",
+    "ANTC_CNTG_PRDY_CTRT",
+    "ACML_VOL",
+    "TOTAL_ASKP_RSQN_ICDC",
+    "TOTAL_BIDP_RSQN_ICDC",
+    "OVTM_TOTAL_ASKP_ICDC",
+    "OVTM_TOTAL_BIDP_ICDC",
+    "STCK_DEAL_CLS_CODE",
+]
+
+_KIS_NOTICE_COLUMNS = [
+    "CUST_ID",
+    "ACNT_NO",
+    "ODER_NO",
+    "OODER_NO",
+    "SELN_BYOV_CLS",
+    "RCTF_CLS",
+    "ODER_KIND",
+    "ODER_COND",
+    "STCK_SHRN_ISCD",
+    "CNTG_QTY",
+    "CNTG_UNPR",
+    "STCK_CNTG_HOUR",
+    "RFUS_YN",
+    "CNTG_YN",
+    "ACPT_YN",
+    "BRNC_NO",
+    "ODER_QTY",
+    "ACNT_NAME",
+    "ORD_COND_PRC",
+    "ORD_EXG_GB",
+    "POPUP_YN",
+    "FILLER",
+    "CRDT_CLS",
+    "CRDT_LOAN_DATE",
+    "CNTG_ISNM40",
+    "ODER_PRC",
+]
+
+KIS_WEBSOCKET_COLUMNS: dict[str, list[str]] = {
+    "H0STASP0": _KIS_ORDERBOOK_COLUMNS,
+    "H0STCNT0": _KIS_TRADE_COLUMNS,
+    "H0STCNI0": _KIS_NOTICE_COLUMNS,
+    "H0STCNI9": _KIS_NOTICE_COLUMNS,
+}
+
 _PERIOD_MAP = {"1d": "D", "1w": "W", "1M": "M", "1mo": "M", "1y": "Y"}
 
 
@@ -104,7 +295,11 @@ def check_status(config: KoreanConnectorConfig | None = None) -> dict[str, Any]:
     report = _check_status(config or load_config(), label=LABEL)
     report["auth_probe"] = "not_run"
     report["auth_probe_reason"] = "KIS token issuance can trigger broker notifications; explicit reads/orders perform auth."
-    report["official_catalog"] = "domestic_stock"
+    report["official_catalog"] = (
+        "domestic_stock REST and WebSocket: FHKST01010100,FHKST03010100,TTTC8434R,VTTC8434R,"
+        "TTTC0011U,TTTC0012U,VTTC0011U,VTTC0012U,TTTC0013U,VTTC0013U,"
+        "H0STASP0,H0NXASP0,H0UNASP0,H0STCNT0,H0NXCNT0,H0UNCNT0,H0STCNI0,H0STCNI9"
+    )
     return report
 
 
@@ -191,6 +386,123 @@ def get_open_orders(
         "environment": cfg.environment,
         "include_executions": include_executions,
         "orders": [_open_order_to_dict(item) for item in _as_list(payload.get("output"))],
+        "raw": payload,
+    }
+
+
+def websocket_url(config: KoreanConnectorConfig | None = None) -> str:
+    """Return KIS' official WebSocket endpoint for the active profile."""
+
+    cfg = config or load_config()
+    return KIS_WEBSOCKET_URLS["paper"] if cfg.environment == "paper" else KIS_WEBSOCKET_URLS["live"]
+
+
+def issue_websocket_approval_key(config: KoreanConnectorConfig | None = None, *, client: Any | None = None) -> str:
+    """Issue the KIS WebSocket approval key used in official real-time samples."""
+
+    cfg = config or load_config()
+    missing = _missing_auth_fields(cfg)
+    if missing:
+        raise KoreanConnectorConfigError(f"{LABEL} connector not configured: missing {', '.join(missing)}.")
+
+    body = {
+        "grant_type": "client_credentials",
+        "appkey": cfg.app_key,
+        "secretkey": cfg.app_secret,
+    }
+    headers = {"Content-Type": "application/json", "Accept": "text/plain", "charset": "UTF-8"}
+    with _client(cfg, client) as active:
+        url = cfg.endpoint.rstrip("/") + KIS_DOMESTIC_STOCK_ENDPOINTS["websocket_approval"]["path"]
+        response = active.post(url, json=body, headers=headers, timeout=cfg.timeout)
+        payload = _response_json(response)
+    approval_key = str(payload.get("approval_key") or "").strip()
+    if not approval_key:
+        raise KoreanConnectorConfigError(f"{LABEL} WebSocket approval response missing approval_key.")
+    return approval_key
+
+
+def build_websocket_subscribe_message(
+    tr_key: str,
+    *,
+    channel: str,
+    approval_key: str,
+    config: KoreanConnectorConfig | None = None,
+    tr_type: str = "1",
+    append_headers: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the official KIS ``data_fetch`` style WebSocket message."""
+
+    cfg = config or load_config()
+    spec = _websocket_channel(channel)
+    key = str(tr_key or "").strip()
+    if spec.get("tr_key") == "symbol":
+        key = _normalize_kr_symbol(key)
+    if not key:
+        raise KoreanConnectorConfigError(f"KIS WebSocket channel {channel!r} requires a tr_key.")
+    if not str(approval_key or "").strip():
+        raise KoreanConnectorConfigError("KIS WebSocket subscriptions require an approval_key from /oauth2/Approval.")
+
+    headers: dict[str, str] = {
+        "content-type": "utf-8",
+        "approval_key": str(approval_key).strip(),
+        "tr_type": str(tr_type or "1"),
+        "custtype": "P",
+    }
+    for header_key, value in dict(append_headers or {}).items():
+        headers[str(header_key)] = str(value)
+
+    return {
+        "header": headers,
+        "body": {"input": {"tr_id": _websocket_tr_id(spec, cfg), "tr_key": key}},
+    }
+
+
+def parse_websocket_message(message: str | bytes, *, channel: str | None = None) -> dict[str, Any]:
+    """Normalize KIS WebSocket data and system frames into stable dictionaries."""
+
+    raw = message.decode("utf-8") if isinstance(message, bytes) else str(message or "")
+    if not raw:
+        return {"type": "error", "status": "error", "error": "empty KIS WebSocket message"}
+    if raw[0] in ("0", "1"):
+        parts = raw.split("|", 3)
+        if len(parts) < 4:
+            return {"type": "error", "status": "error", "raw": raw, "error": "malformed KIS data frame"}
+        tr_id = parts[1]
+        values = parts[3].split("^") if parts[3] else []
+        columns = KIS_WEBSOCKET_COLUMNS.get(tr_id, [])
+        if not columns and channel:
+            columns = _websocket_columns_for_channel(channel)
+        fields = {name: values[idx] for idx, name in enumerate(columns) if idx < len(values)}
+        return {
+            "type": "data",
+            "status": "ok",
+            "prefix": parts[0],
+            "tr_id": tr_id,
+            "sequence": parts[2],
+            "fields": fields,
+            "raw_values": values,
+            "event": _websocket_event(tr_id, fields),
+        }
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return {"type": "error", "status": "error", "raw": raw, "error": str(exc)}
+
+    header = dict(payload.get("header") or {}) if isinstance(payload, Mapping) else {}
+    body = dict(payload.get("body") or {}) if isinstance(payload, Mapping) else {}
+    output = dict(body.get("output") or {}) if isinstance(body.get("output"), Mapping) else {}
+    status = "ok" if str(body.get("rt_cd", "0")) == "0" else "error"
+    return {
+        "type": "system",
+        "status": status,
+        "tr_id": header.get("tr_id"),
+        "tr_key": header.get("tr_key"),
+        "message": body.get("msg1"),
+        "is_pingpong": header.get("tr_id") == "PINGPONG",
+        "encrypted": str(header.get("encrypt") or "").upper() == "Y",
+        "iv": output.get("iv"),
+        "key": output.get("key"),
         "raw": payload,
     }
 
@@ -527,6 +839,85 @@ def _tr_id(operation: str, config: KoreanConnectorConfig) -> str:
 def _order_cash_tr_id(config: KoreanConnectorConfig, side: str) -> str:
     env = "paper" if config.environment == "paper" else "live"
     return KIS_DOMESTIC_STOCK_ENDPOINTS["order_cash"][f"{env}_{side}_tr_id"]
+
+
+def _websocket_channel(channel: str) -> dict[str, str]:
+    spec = KIS_WEBSOCKET_CHANNELS.get(str(channel or "").strip().lower())
+    if spec is None:
+        raise KoreanConnectorConfigError(f"unsupported KIS WebSocket channel: {channel!r}")
+    return spec
+
+
+def _websocket_tr_id(spec: Mapping[str, str], config: KoreanConnectorConfig) -> str:
+    if "paper_tr_id" in spec or "live_tr_id" in spec:
+        return spec["paper_tr_id"] if config.environment == "paper" else spec["live_tr_id"]
+    return spec["tr_id"]
+
+
+def _websocket_columns_for_channel(channel: str) -> list[str]:
+    spec = _websocket_channel(channel)
+    for key in ("tr_id", "paper_tr_id", "live_tr_id"):
+        tr_id = spec.get(key)
+        if tr_id and tr_id in KIS_WEBSOCKET_COLUMNS:
+            return KIS_WEBSOCKET_COLUMNS[tr_id]
+    return []
+
+
+def _websocket_kind_for_tr_id(tr_id: str) -> str:
+    for spec in KIS_WEBSOCKET_CHANNELS.values():
+        if tr_id in {spec.get("tr_id"), spec.get("paper_tr_id"), spec.get("live_tr_id")}:
+            return spec.get("kind", "")
+    return ""
+
+
+def _websocket_event(tr_id: str, fields: Mapping[str, Any]) -> dict[str, Any]:
+    kind = _websocket_kind_for_tr_id(tr_id)
+    if kind in {"trade", "expected_trade", "overtime_trade"}:
+        return {
+            "kind": kind,
+            "symbol": fields.get("MKSC_SHRN_ISCD"),
+            "time": fields.get("STCK_CNTG_HOUR"),
+            "last": _to_float(fields.get("STCK_PRPR")),
+            "change": _to_float(fields.get("PRDY_VRSS")),
+            "change_rate": _to_float(fields.get("PRDY_CTRT")),
+            "trade_volume": _to_float(fields.get("CNTG_VOL")),
+            "volume": _to_float(fields.get("ACML_VOL")),
+            "ask": _to_float(fields.get("ASKP1")),
+            "bid": _to_float(fields.get("BIDP1")),
+        }
+    if kind == "orderbook":
+        return {
+            "kind": kind,
+            "symbol": fields.get("MKSC_SHRN_ISCD"),
+            "time": fields.get("BSOP_HOUR"),
+            "asks": _websocket_book_side(fields, "ASKP", "ASKP_RSQN"),
+            "bids": _websocket_book_side(fields, "BIDP", "BIDP_RSQN"),
+        }
+    if kind == "order_notice":
+        return {
+            "kind": kind,
+            "account": fields.get("ACNT_NO"),
+            "order_id": fields.get("ODER_NO"),
+            "original_order_id": fields.get("OODER_NO"),
+            "symbol": fields.get("STCK_SHRN_ISCD"),
+            "execution_quantity": _to_float(fields.get("CNTG_QTY")),
+            "execution_price": _to_float(fields.get("CNTG_UNPR")),
+            "execution_time": fields.get("STCK_CNTG_HOUR"),
+            "execution_notice": fields.get("CNTG_YN") == "2",
+            "accepted": fields.get("ACPT_YN"),
+            "exchange": fields.get("ORD_EXG_GB"),
+        }
+    return {"kind": kind or "raw"}
+
+
+def _websocket_book_side(fields: Mapping[str, Any], price_prefix: str, quantity_prefix: str) -> list[dict[str, float | int]]:
+    levels: list[dict[str, float | int]] = []
+    for index in range(1, 11):
+        price = _to_float(fields.get(f"{price_prefix}{index}"))
+        quantity = _to_float(fields.get(f"{quantity_prefix}{index}"))
+        if price is not None or quantity is not None:
+            levels.append({"level": index, "price": price, "quantity": quantity})
+    return levels
 
 
 def _account_ref(config: KoreanConnectorConfig) -> str:

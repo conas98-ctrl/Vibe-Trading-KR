@@ -96,6 +96,8 @@ def test_korean_connector_read_write_classification_maps() -> None:
     from src.trading.connectors.ls.classification import LS_TOOL_CLASS
 
     assert KIS_TOOL_CLASS["inquire_price"] is ToolClass.READ
+    assert KIS_TOOL_CLASS["ccnl_notice"] is ToolClass.READ
+    assert KIS_TOOL_CLASS["program_trade_total"] is ToolClass.READ
     assert KIS_TOOL_CLASS["order_cash"] is ToolClass.WRITE
     assert LS_TOOL_CLASS["stock_quote"] is ToolClass.READ
     assert LS_TOOL_CLASS["stock_order"] is ToolClass.WRITE
