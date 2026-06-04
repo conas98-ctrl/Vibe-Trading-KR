@@ -1,8 +1,8 @@
 """LS Securities OpenAPI connector.
 
-The REST catalog here is limited to LS Securities' official OpenAPI sample
-surface verified for this port: token issuance, t1101 stock quote, and t0424
-account balance. Unverified write operations remain fail-closed.
+The REST catalog here is limited to LS Securities' official OpenAPI sample and
+guide JSON surface verified for this port: token issuance, t1101 stock quote,
+t0424 account balance, and CSPAT00601/CSPAT00701/CSPAT00801 stock order flows.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ LS_OPENAPI_ENDPOINTS: dict[str, dict[str, str]] = {
     },
 }
 
-_ORDER_SUCCESS_CODES = {"stock_order": {"00040"}, "cancel_order": {"00156"}}
+_ORDER_SUCCESS_CODES = {"stock_order": {"00040"}, "modify_order": {"00000"}, "cancel_order": {"00156"}}
 
 
 def config_path() -> Path:
@@ -91,7 +91,7 @@ def check_status(config: KoreanConnectorConfig | None = None) -> dict[str, Any]:
     report = _check_status(config or load_config(), label=LABEL)
     report["auth_probe"] = "not_run"
     report["auth_probe_reason"] = "LS token issuance is deferred until an explicit read/order call."
-    report["official_catalog"] = "token,t1101,t0424"
+    report["official_catalog"] = "token,t1101,t0424,CSPAT00601,CSPAT00701,CSPAT00801"
     return report
 
 
@@ -283,6 +283,54 @@ def cancel_order(
     if not _payload_ok(payload, operation="cancel_order"):
         return _error_payload(cfg, payload, symbol=body["CSPAT00801InBlock1"]["IsuNo"])
     return {"status": "ok", "profile": cfg.profile, "environment": cfg.environment, "order_id": str(order_id), "raw": payload}
+
+
+def modify_order(
+    config: KoreanConnectorConfig | None = None,
+    order_id: str = "",
+    *,
+    symbol: str | None = None,
+    quantity: float | int | str | None = None,
+    limit_price: float | int | str | None = None,
+    time_in_force: str = "day",
+    client: Any | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    cfg = config or load_config()
+    missing = _missing_auth_fields(cfg)
+    if missing:
+        return _not_configured(cfg, missing)
+    if not str(order_id or "").strip():
+        return {"status": "error", "profile": cfg.profile, "error": "LS modify_order requires order_id."}
+    if not symbol:
+        return {"status": "error", "profile": cfg.profile, "error": "LS modify_order requires symbol."}
+    if quantity is None:
+        return {"status": "error", "profile": cfg.profile, "error": "LS modify_order requires quantity."}
+    if limit_price is None:
+        return {"status": "error", "profile": cfg.profile, "error": "LS modify_order requires limit_price."}
+
+    body = {
+        "CSPAT00701InBlock1": {
+            "OrgOrdNo": _numeric_value(order_id),
+            "IsuNo": _order_symbol(symbol),
+            "OrdQty": _numeric_value(quantity),
+            "OrdprcPtnCode": "00",
+            "OrdCndiTpCode": _order_condition_code(time_in_force),
+            "OrdPrc": _numeric_value(limit_price),
+        }
+    }
+    payload = _request_json(cfg, "modify_order", body=body, client=client)
+    if not _payload_ok(payload, operation="modify_order"):
+        return _error_payload(cfg, payload, symbol=body["CSPAT00701InBlock1"]["IsuNo"])
+    output = _first_mapping(payload.get("CSPAT00701OutBlock2"))
+    return {
+        "status": "ok",
+        "profile": cfg.profile,
+        "environment": cfg.environment,
+        "order_id": str(order_id),
+        "broker_order_ref": output,
+        "raw": payload,
+    }
 
 
 def _request_json(

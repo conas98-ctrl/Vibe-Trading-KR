@@ -68,6 +68,8 @@ class _LsClient:
             tr_cd = (headers or {}).get("tr_cd", "")
             if tr_cd == "CSPAT00601":
                 return _Response({"rsp_cd": "00040", "rsp_msg": "buy order accepted", "CSPAT00601OutBlock2": {"OrdNo": 32004}})
+            if tr_cd == "CSPAT00701":
+                return _Response({"rsp_cd": "00000", "rsp_msg": "modify order accepted", "CSPAT00701OutBlock2": {"OrdNo": 32005}})
             if tr_cd == "CSPAT00801":
                 return _Response({"rsp_cd": "00156", "rsp_msg": "cancel order accepted", "CSPAT00801OutBlock2": {"OrdNo": 84006}})
             raise AssertionError(f"unexpected LS stock/order tr_cd={tr_cd}")
@@ -169,6 +171,7 @@ def test_ls_catalog_matches_official_openapi_samples() -> None:
     assert ls.LS_OPENAPI_ENDPOINTS["account_balance"]["tr_cd"] == "t0424"
     assert ls.LS_OPENAPI_ENDPOINTS["stock_order"]["path"] == "/stock/order"
     assert ls.LS_OPENAPI_ENDPOINTS["stock_order"]["tr_cd"] == "CSPAT00601"
+    assert ls.LS_OPENAPI_ENDPOINTS["modify_order"]["tr_cd"] == "CSPAT00701"
     assert ls.LS_OPENAPI_ENDPOINTS["cancel_order"]["tr_cd"] == "CSPAT00801"
 
 
@@ -241,6 +244,26 @@ def test_ls_order_and_cancel_use_official_stock_order_contracts() -> None:
         }
     }
     assert cancel_call["json"] == {"CSPAT00801InBlock1": {"OrgOrdNo": 32004, "IsuNo": "A005930", "OrdQty": 3}}
+
+
+def test_ls_modify_order_uses_official_cspat00701_contract() -> None:
+    client = _LsClient()
+    out = ls.modify_order(_ls_cfg(), "32004", symbol="005930", quantity=2, limit_price=71000, client=client)
+    assert out["status"] == "ok"
+    assert out["order_id"] == "32004"
+
+    modify_call = next(call for call in client.calls if call["headers"].get("tr_cd") == "CSPAT00701")
+    assert modify_call["path"] == "/stock/order"
+    assert modify_call["json"] == {
+        "CSPAT00701InBlock1": {
+            "OrgOrdNo": 32004,
+            "IsuNo": "A005930",
+            "OrdQty": 2,
+            "OrdprcPtnCode": "00",
+            "OrdCndiTpCode": "0",
+            "OrdPrc": 71000,
+        }
+    }
 
 
 def test_kiwoom_catalog_matches_official_openapi_guides() -> None:
