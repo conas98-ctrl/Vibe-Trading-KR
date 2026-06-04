@@ -89,6 +89,27 @@ class _KisClient:
                 },
                 headers={"tr_cont": ""},
             )
+        if path == "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl":
+            return _Response(
+                {
+                    "rt_cd": "0",
+                    "output": [
+                        {
+                            "odno": "00001",
+                            "ord_gno_brno": "91234",
+                            "pdno": "005930",
+                            "ord_qty": "5",
+                            "tot_ccld_qty": "2",
+                            "psbl_qty": "3",
+                            "sll_buy_dvsn_cd": "02",
+                            "ord_unpr": "70000",
+                        }
+                    ],
+                    "ctx_area_fk100": "",
+                    "ctx_area_nk100": "",
+                },
+                headers={"tr_cont": ""},
+            )
         raise AssertionError(f"unexpected GET {path}")
 
 
@@ -112,6 +133,10 @@ def test_kis_catalog_matches_official_domestic_stock_samples() -> None:
     assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["inquire_price"]["tr_id"] == "FHKST01010100"
     assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["inquire_daily_itemchartprice"]["tr_id"] == "FHKST03010100"
     assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["inquire_balance"]["paper_tr_id"] == "VTTC8434R"
+    assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["inquire_psbl_rvsecncl"]["path"] == (
+        "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
+    )
+    assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["inquire_psbl_rvsecncl"]["tr_id"] == "TTTC0084R"
     assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["order_cash"]["paper_buy_tr_id"] == "VTTC0012U"
     assert kis.KIS_DOMESTIC_STOCK_ENDPOINTS["order_cash"]["live_sell_tr_id"] == "TTTC0011U"
 
@@ -158,6 +183,47 @@ def test_kis_account_snapshot_uses_paper_balance_tr_id() -> None:
     assert balance_call["headers"]["tr_id"] == "VTTC8434R"
     assert balance_call["params"]["CANO"] == "12345678"
     assert balance_call["params"]["ACNT_PRDT_CD"] == "01"
+
+
+def test_kis_open_orders_use_psbl_rvsecncl_contract() -> None:
+    client = _KisClient()
+    out = kis.get_open_orders(_cfg(), client=client)
+    assert out["status"] == "ok"
+    assert out["orders"] == [
+        {
+            "order_id": "00001",
+            "broker_order_id": "91234:00001",
+            "symbol": "005930",
+            "side": "buy",
+            "quantity": 5.0,
+            "filled_quantity": 2.0,
+            "remaining_quantity": 3.0,
+            "cancelable_quantity": 3.0,
+            "limit_price": 70000.0,
+            "raw": {
+                "odno": "00001",
+                "ord_gno_brno": "91234",
+                "pdno": "005930",
+                "ord_qty": "5",
+                "tot_ccld_qty": "2",
+                "psbl_qty": "3",
+                "sll_buy_dvsn_cd": "02",
+                "ord_unpr": "70000",
+            },
+        }
+    ]
+
+    call = client.calls[-1]
+    assert call["path"] == "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
+    assert call["headers"]["tr_id"] == "TTTC0084R"
+    assert call["params"] == {
+        "CANO": "12345678",
+        "ACNT_PRDT_CD": "01",
+        "INQR_DVSN_1": "1",
+        "INQR_DVSN_2": "0",
+        "CTX_AREA_FK100": "",
+        "CTX_AREA_NK100": "",
+    }
 
 
 def test_kis_place_order_hashes_and_posts_order_cash() -> None:

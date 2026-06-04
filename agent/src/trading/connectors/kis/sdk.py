@@ -53,6 +53,11 @@ KIS_DOMESTIC_STOCK_ENDPOINTS: dict[str, dict[str, str]] = {
         "live_tr_id": "TTTC8434R",
         "paper_tr_id": "VTTC8434R",
     },
+    "inquire_psbl_rvsecncl": {
+        "method": "GET",
+        "path": "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl",
+        "tr_id": "TTTC0084R",
+    },
     "order_cash": {
         "method": "POST",
         "path": "/uapi/domestic-stock/v1/trading/order-cash",
@@ -157,12 +162,36 @@ def get_positions(config: KoreanConnectorConfig | None = None, *, client: Any | 
     }
 
 
-def get_open_orders(config: KoreanConnectorConfig | None = None, *, include_executions: bool = False) -> dict[str, Any]:
+def get_open_orders(
+    config: KoreanConnectorConfig | None = None,
+    *,
+    include_executions: bool = False,
+    client: Any | None = None,
+) -> dict[str, Any]:
     cfg = config or load_config()
+    missing = _missing_account_fields(cfg)
+    if missing:
+        return _not_configured(cfg, missing)
+
+    params = {
+        "CANO": cfg.account,
+        "ACNT_PRDT_CD": cfg.account_product_code,
+        "INQR_DVSN_1": "1",
+        "INQR_DVSN_2": "0",
+        "CTX_AREA_FK100": "",
+        "CTX_AREA_NK100": "",
+    }
+    tr_id = KIS_DOMESTIC_STOCK_ENDPOINTS["inquire_psbl_rvsecncl"]["tr_id"]
+    payload = _request_json(cfg, "GET", "inquire_psbl_rvsecncl", tr_id=tr_id, params=params, client=client)
+    if not _payload_ok(payload):
+        return _error_payload(cfg, payload)
     return {
-        "status": "error",
+        "status": "ok",
         "profile": cfg.profile,
-        "error": "KIS open-order read is not implemented yet; add inquire-psbl-rvsecncl/order ledger contract first.",
+        "environment": cfg.environment,
+        "include_executions": include_executions,
+        "orders": [_open_order_to_dict(item) for item in _as_list(payload.get("output"))],
+        "raw": payload,
     }
 
 
@@ -516,6 +545,31 @@ def _position_to_dict(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _open_order_to_dict(item: Mapping[str, Any]) -> dict[str, Any]:
+    order_id = str(_field(item, "odno", "ODNO", "orgn_odno", "ORGN_ODNO") or "").strip()
+    orgno = str(
+        _field(item, "ord_gno_brno", "ORD_GNO_BRNO", "krx_fwdg_ord_orgno", "KRX_FWDG_ORD_ORGNO") or ""
+    ).strip()
+    quantity = _to_float(_field(item, "ord_qty", "ORD_QTY"))
+    filled_quantity = _to_float(_field(item, "tot_ccld_qty", "TOT_CCLD_QTY", "ccld_qty", "CCLD_QTY"))
+    cancelable_quantity = _to_float(_field(item, "psbl_qty", "PSBL_QTY"))
+    remaining_quantity = cancelable_quantity
+    if remaining_quantity is None and quantity is not None and filled_quantity is not None:
+        remaining_quantity = max(quantity - filled_quantity, 0.0)
+    return {
+        "order_id": order_id,
+        "broker_order_id": f"{orgno}:{order_id}" if orgno and order_id else order_id,
+        "symbol": str(_field(item, "pdno", "PDNO", "stck_shrn_iscd", "STCK_SHRN_ISCD") or "").strip(),
+        "side": _kis_order_side(_field(item, "sll_buy_dvsn_cd", "SLL_BUY_DVSN_CD", "sll_buy_dvsn_name")),
+        "quantity": quantity,
+        "filled_quantity": filled_quantity,
+        "remaining_quantity": remaining_quantity,
+        "cancelable_quantity": cancelable_quantity,
+        "limit_price": _to_float(_field(item, "ord_unpr", "ORD_UNPR")),
+        "raw": dict(item),
+    }
+
+
 def _bar_to_dict(item: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "date": item.get("stck_bsop_date"),
@@ -542,6 +596,28 @@ def _first_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, list) and value and isinstance(value[0], Mapping):
         return dict(value[0])
     return {}
+
+
+def _field(item: Mapping[str, Any], *names: str) -> Any:
+    for name in names:
+        value = item.get(name)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _kis_order_side(value: Any) -> str | None:
+    token = str(value or "").strip().lower()
+    return {
+        "01": "sell",
+        "1": "sell",
+        "sell": "sell",
+        "매도": "sell",
+        "02": "buy",
+        "2": "buy",
+        "buy": "buy",
+        "매수": "buy",
+    }.get(token, token or None)
 
 
 def _to_float(value: Any) -> float | None:
