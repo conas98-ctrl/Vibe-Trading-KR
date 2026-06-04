@@ -26,6 +26,7 @@ class KoreanConnectorConfig:
     profile: str = "paper"
     app_key: str = ""
     app_secret: str = ""
+    access_token: str = ""
     account: str = ""
     account_product_code: str = ""
     base_url: str = ""
@@ -55,6 +56,7 @@ class KoreanConnectorConfig:
             profile=profile,
             app_key=str(payload.get("app_key") or "").strip(),
             app_secret=str(payload.get("app_secret") or "").strip(),
+            access_token=str(payload.get("access_token") or "").strip(),
             account=str(payload.get("account") or "").strip(),
             account_product_code=str(payload.get("account_product_code") or "").strip(),
             base_url=str(payload.get("base_url") or "").strip(),
@@ -95,6 +97,7 @@ class KoreanConnectorConfig:
 OVERRIDE_KEYS = (
     "app_key",
     "app_secret",
+    "access_token",
     "account",
     "account_product_code",
     "base_url",
@@ -185,7 +188,7 @@ def unsupported_or_unconfigured(config: KoreanConnectorConfig, *, label: str, op
 
 def public_config(config: KoreanConnectorConfig) -> dict[str, Any]:
     data = asdict(config)
-    for key in ("app_secret", "bridge_token"):
+    for key in ("app_secret", "access_token", "bridge_token"):
         if data.get(key):
             data[key] = "***redacted***"
     if data.get("app_key"):
