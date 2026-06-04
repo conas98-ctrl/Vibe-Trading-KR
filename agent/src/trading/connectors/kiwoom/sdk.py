@@ -302,6 +302,50 @@ def place_order(
     }
 
 
+def modify_order(
+    config: KoreanConnectorConfig | None = None,
+    order_id: str = "",
+    *,
+    symbol: str | None = None,
+    quantity: float | int | str | None = None,
+    limit_price: float | int | str | None = None,
+    client: Any | None = None,
+    exchange: str = "KRX",
+    **_: Any,
+) -> dict[str, Any]:
+    cfg = config or load_config()
+    missing = _missing_auth_fields(cfg)
+    if missing:
+        return _not_configured(cfg, missing)
+    if not str(order_id or "").strip():
+        return {"status": "error", "profile": cfg.profile, "error": "Kiwoom modify_order requires order_id."}
+    if not symbol:
+        return {"status": "error", "profile": cfg.profile, "error": "Kiwoom modify_order requires symbol."}
+    if quantity is None:
+        return {"status": "error", "profile": cfg.profile, "error": "Kiwoom modify_order requires quantity."}
+    if limit_price is None:
+        return {"status": "error", "profile": cfg.profile, "error": "Kiwoom modify_order requires limit_price."}
+
+    body = {
+        "dmst_stex_tp": exchange,
+        "orig_ord_no": str(order_id).strip(),
+        "stk_cd": _normalize_kr_symbol(symbol),
+        "mdfy_qty": _numeric_string(quantity),
+        "mdfy_uv": _numeric_string(limit_price),
+        "mdfy_cond_uv": "",
+    }
+    payload = _request_json(cfg, "stock_modify_order", body=body, client=client)
+    if not _payload_ok(payload):
+        return _error_payload(cfg, payload, symbol=body["stk_cd"])
+    return {
+        "status": "ok",
+        "profile": cfg.profile,
+        "environment": cfg.environment,
+        "order_id": str(payload.get("ord_no") or order_id),
+        "raw": payload,
+    }
+
+
 def cancel_order(
     config: KoreanConnectorConfig | None = None,
     order_id: str = "",

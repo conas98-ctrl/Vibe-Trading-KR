@@ -64,6 +64,13 @@ class _LsClient:
                     ],
                 }
             )
+        if path == "/stock/order":
+            tr_cd = (headers or {}).get("tr_cd", "")
+            if tr_cd == "CSPAT00601":
+                return _Response({"rsp_cd": "00040", "rsp_msg": "buy order accepted", "CSPAT00601OutBlock2": {"OrdNo": 32004}})
+            if tr_cd == "CSPAT00801":
+                return _Response({"rsp_cd": "00156", "rsp_msg": "cancel order accepted", "CSPAT00801OutBlock2": {"OrdNo": 84006}})
+            raise AssertionError(f"unexpected LS stock/order tr_cd={tr_cd}")
         raise AssertionError(f"unexpected LS POST {path}")
 
 
@@ -160,6 +167,9 @@ def test_ls_catalog_matches_official_openapi_samples() -> None:
     assert ls.LS_OPENAPI_ENDPOINTS["stock_quote"]["tr_cd"] == "t1101"
     assert ls.LS_OPENAPI_ENDPOINTS["account_balance"]["path"] == "/stock/accno"
     assert ls.LS_OPENAPI_ENDPOINTS["account_balance"]["tr_cd"] == "t0424"
+    assert ls.LS_OPENAPI_ENDPOINTS["stock_order"]["path"] == "/stock/order"
+    assert ls.LS_OPENAPI_ENDPOINTS["stock_order"]["tr_cd"] == "CSPAT00601"
+    assert ls.LS_OPENAPI_ENDPOINTS["cancel_order"]["tr_cd"] == "CSPAT00801"
 
 
 def test_ls_quote_requests_token_and_official_t1101_contract() -> None:
@@ -195,6 +205,42 @@ def test_ls_account_snapshot_uses_official_t0424_contract() -> None:
     assert balance_call["json"] == {
         "t0424InBlock": {"prcgb": "", "chegb": "", "dangb": "", "charge": "", "cts_expcode": ""}
     }
+
+
+def test_ls_order_and_cancel_use_official_stock_order_contracts() -> None:
+    client = _LsClient()
+    order = ls.place_order(
+        _ls_cfg(),
+        symbol="005930",
+        side="buy",
+        quantity=3,
+        order_type="limit",
+        limit_price=70000,
+        client=client,
+        exchange="KRX",
+    )
+    cancel = ls.cancel_order(_ls_cfg(), "32004", symbol="005930", quantity=3, client=client)
+    assert order["status"] == "ok"
+    assert order["order_id"] == "32004"
+    assert cancel["status"] == "ok"
+
+    order_call = next(call for call in client.calls if call["headers"].get("tr_cd") == "CSPAT00601")
+    cancel_call = next(call for call in client.calls if call["headers"].get("tr_cd") == "CSPAT00801")
+    assert order_call["path"] == "/stock/order"
+    assert order_call["json"] == {
+        "CSPAT00601InBlock1": {
+            "IsuNo": "A005930",
+            "OrdQty": 3,
+            "OrdPrc": 70000,
+            "BnsTpCode": "2",
+            "OrdprcPtnCode": "00",
+            "MgntrnCode": "000",
+            "LoanDt": "",
+            "OrdCndiTpCode": "0",
+            "MbrNo": "KRX",
+        }
+    }
+    assert cancel_call["json"] == {"CSPAT00801InBlock1": {"OrgOrdNo": 32004, "IsuNo": "A005930", "OrdQty": 3}}
 
 
 def test_kiwoom_catalog_matches_official_openapi_guides() -> None:
@@ -295,3 +341,21 @@ def test_kiwoom_order_and_cancel_use_official_order_api_ids() -> None:
     assert sell_call["json"]["ord_uv"] == ""
     assert cancel_call["headers"]["api-id"] == "kt10003"
     assert cancel_call["json"] == {"dmst_stex_tp": "KRX", "orig_ord_no": "7654321", "stk_cd": "005930", "cncl_qty": "0"}
+
+
+def test_kiwoom_modify_order_uses_official_kt10002_contract() -> None:
+    client = _KiwoomClient()
+    out = kiwoom.modify_order(_kiwoom_cfg(), "7654321", symbol="005930", quantity=2, limit_price=71000, client=client, exchange="KRX")
+    assert out["status"] == "ok"
+    assert out["order_id"] == "7654321"
+
+    modify_call = _kiwoom_call(client, "kt10002")
+    assert modify_call["path"] == "/api/dostk/ordr"
+    assert modify_call["json"] == {
+        "dmst_stex_tp": "KRX",
+        "orig_ord_no": "7654321",
+        "stk_cd": "005930",
+        "mdfy_qty": "2",
+        "mdfy_uv": "71000",
+        "mdfy_cond_uv": "",
+    }

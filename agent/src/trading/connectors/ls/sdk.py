@@ -44,7 +44,24 @@ LS_OPENAPI_ENDPOINTS: dict[str, dict[str, str]] = {
         "path": "/stock/accno",
         "tr_cd": "t0424",
     },
+    "stock_order": {
+        "method": "POST",
+        "path": "/stock/order",
+        "tr_cd": "CSPAT00601",
+    },
+    "modify_order": {
+        "method": "POST",
+        "path": "/stock/order",
+        "tr_cd": "CSPAT00701",
+    },
+    "cancel_order": {
+        "method": "POST",
+        "path": "/stock/order",
+        "tr_cd": "CSPAT00801",
+    },
 }
+
+_ORDER_SUCCESS_CODES = {"stock_order": {"00040"}, "cancel_order": {"00156"}}
 
 
 def config_path() -> Path:
@@ -163,12 +180,109 @@ def get_historical_bars(
     }
 
 
-def place_order(config: KoreanConnectorConfig | None = None, **_: Any) -> dict[str, Any]:
-    return unsupported_or_unconfigured(config or load_config(), label=LABEL, operation="place order")
+def place_order(
+    config: KoreanConnectorConfig | None = None,
+    *,
+    symbol: str,
+    side: str,
+    quantity: float | None = None,
+    notional: float | None = None,
+    order_type: str = "market",
+    limit_price: float | None = None,
+    time_in_force: str = "day",
+    client: Any | None = None,
+    exchange: str = "KRX",
+    **_: Any,
+) -> dict[str, Any]:
+    cfg = config or load_config()
+    missing = _missing_auth_fields(cfg)
+    if missing:
+        return _not_configured(cfg, missing)
+    if quantity is None:
+        return {"status": "error", "profile": cfg.profile, "error": "LS orders require quantity; notional-only orders are unsupported."}
+    if notional is not None and quantity is None:
+        return {"status": "error", "profile": cfg.profile, "error": "LS orders require explicit quantity."}
+
+    clean_side = str(side or "").strip().lower()
+    if clean_side not in ("buy", "sell"):
+        return {"status": "error", "profile": cfg.profile, "error": "LS order side must be 'buy' or 'sell'."}
+    bns_tp_code = "2" if clean_side == "buy" else "1"
+
+    clean_type = str(order_type or "market").strip().lower()
+    if clean_type == "limit":
+        if limit_price is None:
+            return {"status": "error", "profile": cfg.profile, "error": "LS limit orders require limit_price."}
+        ordprc_ptn_code = "00"
+        ord_prc = _numeric_value(limit_price)
+    elif clean_type == "market":
+        ordprc_ptn_code = "03"
+        ord_prc = 0
+    else:
+        return {"status": "error", "profile": cfg.profile, "error": "LS order_type must be 'market' or 'limit'."}
+
+    body = {
+        "CSPAT00601InBlock1": {
+            "IsuNo": _order_symbol(symbol),
+            "OrdQty": _numeric_value(quantity),
+            "OrdPrc": ord_prc,
+            "BnsTpCode": bns_tp_code,
+            "OrdprcPtnCode": ordprc_ptn_code,
+            "MgntrnCode": "000",
+            "LoanDt": "",
+            "OrdCndiTpCode": _order_condition_code(time_in_force),
+            "MbrNo": (str(exchange or "KRX").strip().upper() or "KRX"),
+        }
+    }
+    payload = _request_json(cfg, "stock_order", body=body, client=client)
+    if not _payload_ok(payload, operation="stock_order"):
+        return _error_payload(cfg, payload, symbol=body["CSPAT00601InBlock1"]["IsuNo"])
+    output = _first_mapping(payload.get("CSPAT00601OutBlock2"))
+    return {
+        "status": "ok",
+        "profile": cfg.profile,
+        "environment": cfg.environment,
+        "paper_guard": "profile_endpoint_separated",
+        "symbol": body["CSPAT00601InBlock1"]["IsuNo"],
+        "side": clean_side,
+        "quantity": _to_float(body["CSPAT00601InBlock1"]["OrdQty"]),
+        "order_type": clean_type,
+        "order_id": str(output.get("OrdNo") or ""),
+        "broker_order_ref": output,
+        "raw": payload,
+    }
 
 
-def cancel_order(config: KoreanConnectorConfig | None = None, order_id: str = "", **_: Any) -> dict[str, Any]:
-    return unsupported_or_unconfigured(config or load_config(), label=LABEL, operation=f"cancel order {order_id}")
+def cancel_order(
+    config: KoreanConnectorConfig | None = None,
+    order_id: str = "",
+    *,
+    symbol: str | None = None,
+    quantity: float | int | str | None = None,
+    client: Any | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    cfg = config or load_config()
+    missing = _missing_auth_fields(cfg)
+    if missing:
+        return _not_configured(cfg, missing)
+    if not str(order_id or "").strip():
+        return {"status": "error", "profile": cfg.profile, "error": "LS cancel_order requires order_id."}
+    if not symbol:
+        return {"status": "error", "profile": cfg.profile, "error": "LS cancel_order requires symbol."}
+    if quantity is None:
+        return {"status": "error", "profile": cfg.profile, "error": "LS cancel_order requires quantity because CSPAT00801 requires OrdQty."}
+
+    body = {
+        "CSPAT00801InBlock1": {
+            "OrgOrdNo": _numeric_value(order_id),
+            "IsuNo": _order_symbol(symbol),
+            "OrdQty": _numeric_value(quantity),
+        }
+    }
+    payload = _request_json(cfg, "cancel_order", body=body, client=client)
+    if not _payload_ok(payload, operation="cancel_order"):
+        return _error_payload(cfg, payload, symbol=body["CSPAT00801InBlock1"]["IsuNo"])
+    return {"status": "ok", "profile": cfg.profile, "environment": cfg.environment, "order_id": str(order_id), "raw": payload}
 
 
 def _request_json(
@@ -241,8 +355,10 @@ def _response_json(response: Any) -> dict[str, Any]:
     return dict(payload or {}) if isinstance(payload, Mapping) else {"raw": payload}
 
 
-def _payload_ok(payload: Mapping[str, Any]) -> bool:
+def _payload_ok(payload: Mapping[str, Any], *, operation: str = "") -> bool:
     code = str(payload.get("rsp_cd") or payload.get("response_code") or "00000").strip()
+    if operation in _ORDER_SUCCESS_CODES:
+        return code in _ORDER_SUCCESS_CODES[operation]
     return code in ("00000", "0")
 
 
@@ -287,6 +403,22 @@ def _normalize_kr_symbol(symbol: str) -> str:
     return token
 
 
+def _order_symbol(symbol: str) -> str:
+    token = _normalize_kr_symbol(symbol)
+    if len(token) == 6 and token.isdigit():
+        return f"A{token}"
+    return token
+
+
+def _order_condition_code(time_in_force: str) -> str:
+    token = str(time_in_force or "day").strip().lower()
+    if token == "ioc":
+        return "1"
+    if token == "fok":
+        return "2"
+    return "0"
+
+
 def _position_to_dict(item: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "symbol": str(item.get("expcode") or "").strip(),
@@ -321,3 +453,8 @@ def _to_float(value: Any) -> float | None:
         return float(str(value).replace(",", ""))
     except (TypeError, ValueError):
         return None
+
+
+def _numeric_value(value: float | int | str) -> int | float:
+    numeric = float(value)
+    return int(numeric) if numeric.is_integer() else numeric
