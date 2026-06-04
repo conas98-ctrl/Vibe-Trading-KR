@@ -3,10 +3,13 @@
 The REST catalog here is limited to LS Securities' official OpenAPI sample and
 guide JSON surface verified for this port: token issuance, t1101 stock quote,
 t0424 account balance, and CSPAT00601/CSPAT00701/CSPAT00801 stock order flows.
+The WebSocket catalog is derived from the official ``[주식] 실시간 시세``
+guide JSON for `/websocket/stock`.
 """
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping
@@ -61,6 +64,104 @@ LS_OPENAPI_ENDPOINTS: dict[str, dict[str, str]] = {
     },
 }
 
+LS_WEBSOCKET_URLS: dict[str, str] = {
+    "paper": "wss://openapi.ls-sec.co.kr:29443",
+    "live": "wss://openapi.ls-sec.co.kr:9443",
+}
+
+LS_WEBSOCKET_ENDPOINTS: dict[str, dict[str, str]] = {
+    "stock_realtime": {
+        "api_id": "9a2800c3-9bf2-4d67-8d83-905074f06646",
+        "path": "/websocket/stock",
+        "protocol": "WEBSOCKET",
+        "content_type": "application/json; charset=UTF-8",
+    },
+}
+
+LS_STOCK_WEBSOCKET_TRS: dict[str, str] = {
+    "B7_": "ETF호가잔량",
+    "DH1": "KOSPI시간외단일가호가잔량",
+    "DHA": "KOSDAQ시간외단일가호가잔량",
+    "DK3": "KOSDAQ시간외단일가체결",
+    "DS3": "KOSPI시간외단일가체결",
+    "DVI": "시간외단일가VI발동해제",
+    "H1_": "KOSPI호가잔량",
+    "H2_": "KOSPI장전시간외호가잔량",
+    "HA_": "KOSDAQ호가잔량",
+    "HB_": "KOSDAQ장전시간외호가잔량",
+    "I5_": "코스피ETF종목실시간NAV",
+    "IJ_": "지수",
+    "K1_": "KOSPI거래원",
+    "K3_": "KOSDAQ체결",
+    "KH_": "KOSDAQ프로그램매매종목별",
+    "KM_": "KOSDAQ프로그램매매전체집계",
+    "KS_": "KOSDAQ우선호가",
+    "OK_": "KOSDAQ거래원",
+    "PH_": "KOSPI프로그램매매종목별",
+    "PM_": "KOSPI프로그램매매전체집계",
+    "S2_": "KOSPI우선호가",
+    "S3_": "KOSPI체결",
+    "S4_": "KOSPI기세",
+    "SC0": "주식주문접수",
+    "SC1": "주식주문체결",
+    "SC2": "주식주문정정",
+    "SC3": "주식주문취소",
+    "SC4": "주식주문거부",
+    "SHC": "상/하한가근접진입",
+    "SHD": "상/하한가근접이탈",
+    "SHI": "상/하한가진입",
+    "SHO": "상/하한가이탈",
+    "VI_": "VI발동해제",
+    "YJ_": "예상지수",
+    "YK3": "KOSDAQ예상체결",
+    "YS3": "KOSPI예상체결",
+    "ESN": "뉴ELW투자지표민감도",
+    "h2_": "ELW장전시간외호가잔량",
+    "h3_": "ELW호가잔량",
+    "k1_": "ELW거래원",
+    "s2_": "ELW우선호가",
+    "s3_": "ELW체결",
+    "s4_": "ELW기세",
+    "Ys3": "ELW예상체결",
+    "NS3": "(NXT)체결",
+    "NH1": "(NXT)호가잔량",
+    "NS2": "(NXT)우선호가",
+    "NYS": "(NXT)예상체결",
+    "NVI": "(NXT)VI 발동 해제",
+    "NK1": "(NXT)거래원",
+    "NPH": "(NXT)프로그램매매종목별",
+    "NPM": "(NXT)프로그램매매전체집계",
+    "NBT": "(NXT)시간대별투자자매매추이",
+    "NBM": "(NXT)업종별투자자별매매현황",
+    "US3": "(통합)체결",
+    "UH1": "(통합)호가잔량",
+    "US2": "(통합)우선호가",
+    "UYS": "(통합)예상체결",
+    "UPH": "(통합)프로그램매매종목별",
+    "UK1": "(통합)거래원",
+    "UBT": "(통합)시간대별투자자매매추이",
+    "UBM": "(통합) 업종별투자자별매매현황",
+    "UPM": "(통합)프로그램매매전체집계",
+    "UVI": "(통합)VI발동해제",
+    "AFR": "API사용자조건검색실시간",
+}
+
+LS_WEBSOCKET_CHANNELS: dict[str, dict[str, str]] = {
+    "kospi_trade": {"tr_cd": "S3_", "tr_type": "3", "kind": "trade", "tr_key": "symbol"},
+    "kosdaq_trade": {"tr_cd": "K3_", "tr_type": "3", "kind": "trade", "tr_key": "symbol"},
+    "nxt_trade": {"tr_cd": "NS3", "tr_type": "3", "kind": "trade", "tr_key": "symbol"},
+    "total_trade": {"tr_cd": "US3", "tr_type": "3", "kind": "trade", "tr_key": "symbol"},
+    "kospi_orderbook": {"tr_cd": "H1_", "tr_type": "3", "kind": "orderbook", "tr_key": "symbol"},
+    "kosdaq_orderbook": {"tr_cd": "HA_", "tr_type": "3", "kind": "orderbook", "tr_key": "symbol"},
+    "nxt_orderbook": {"tr_cd": "NH1", "tr_type": "3", "kind": "orderbook", "tr_key": "symbol"},
+    "total_orderbook": {"tr_cd": "UH1", "tr_type": "3", "kind": "orderbook", "tr_key": "symbol"},
+    "stock_order_accept": {"tr_cd": "SC0", "tr_type": "1", "kind": "order_accept", "tr_key": "account"},
+    "stock_order_execution": {"tr_cd": "SC1", "tr_type": "1", "kind": "order_execution", "tr_key": "account"},
+    "stock_order_modify": {"tr_cd": "SC2", "tr_type": "1", "kind": "order_modify", "tr_key": "account"},
+    "stock_order_cancel": {"tr_cd": "SC3", "tr_type": "1", "kind": "order_cancel", "tr_key": "account"},
+    "stock_order_reject": {"tr_cd": "SC4", "tr_type": "1", "kind": "order_reject", "tr_key": "account"},
+}
+
 _ORDER_SUCCESS_CODES = {"stock_order": {"00040"}, "modify_order": {"00000"}, "cancel_order": {"00156"}}
 
 
@@ -91,7 +192,7 @@ def check_status(config: KoreanConnectorConfig | None = None) -> dict[str, Any]:
     report = _check_status(config or load_config(), label=LABEL)
     report["auth_probe"] = "not_run"
     report["auth_probe_reason"] = "LS token issuance is deferred until an explicit read/order call."
-    report["official_catalog"] = "token,t1101,t0424,CSPAT00601,CSPAT00701,CSPAT00801"
+    report["official_catalog"] = "token,t1101,t0424,CSPAT00601,CSPAT00701,CSPAT00801,stock-websocket-65tr"
     return report
 
 
@@ -177,6 +278,120 @@ def get_historical_bars(
         "status": "error",
         "profile": cfg.profile,
         "error": "LS historical bars are not implemented yet; t1301 is an intraday execution feed, not an OHLC bar contract.",
+    }
+
+
+def websocket_url(config: KoreanConnectorConfig | None = None) -> str:
+    """Return LS OpenAPI's official stock WebSocket endpoint for the active profile."""
+
+    cfg = config or load_config()
+    base = LS_WEBSOCKET_URLS["paper"] if cfg.environment == "paper" else LS_WEBSOCKET_URLS["live"]
+    return base + LS_WEBSOCKET_ENDPOINTS["stock_realtime"]["path"]
+
+
+def build_websocket_subscribe_message(
+    tr_key: str,
+    *,
+    channel: str,
+    config: KoreanConnectorConfig | None = None,
+    client: Any | None = None,
+) -> dict[str, Any]:
+    """Build the official LS OpenAPI WebSocket subscription frame."""
+
+    cfg = config or load_config()
+    spec = LS_WEBSOCKET_CHANNELS.get(str(channel or "").strip().lower())
+    if spec is None:
+        raise KoreanConnectorConfigError(f"unsupported LS WebSocket channel: {channel!r}")
+    token = cfg.access_token
+    if not token:
+        if client is None:
+            raise KoreanConnectorConfigError("LS WebSocket subscriptions require access_token or a client for token issuance.")
+        token = _access_token(cfg, client)
+
+    key = str(tr_key or "").strip()
+    if spec.get("tr_key") == "symbol":
+        key = _normalize_kr_symbol(key)
+        if not key:
+            raise KoreanConnectorConfigError(f"LS WebSocket channel {channel!r} requires a symbol.")
+
+    return {
+        "header": {"token": token, "tr_type": spec["tr_type"]},
+        "body": {"tr_cd": spec["tr_cd"], "tr_key": key},
+    }
+
+
+def parse_websocket_message(message: Mapping[str, Any] | str | bytes) -> dict[str, Any]:
+    """Normalize LS WebSocket JSON events into stable dictionaries."""
+
+    if isinstance(message, bytes):
+        message = message.decode("utf-8")
+    payload = json.loads(message) if isinstance(message, str) else dict(message)
+    header = _first_mapping(payload.get("header"))
+    body = _first_mapping(payload.get("body"))
+    tr_cd = str(header.get("tr_cd") or body.get("tr_cd") or "").strip()
+    kind = _websocket_kind(tr_cd)
+
+    if kind == "trade":
+        symbol = _normalize_kr_symbol(str(body.get("shcode") or header.get("tr_key") or ""))
+        return {
+            "status": "ok",
+            "channel": "trade",
+            "tr_cd": tr_cd,
+            "symbol": symbol,
+            "quote": {
+                "last": _to_float(body.get("price") or body.get("dan_price")),
+                "change": _to_float(body.get("change") or body.get("dan_change")),
+                "change_rate": _to_float(body.get("drate") or body.get("dan_drate")),
+                "trade_volume": _to_float(body.get("cvolume") or body.get("dan_cvolume")),
+                "volume": _to_float(body.get("volume") or body.get("dan_volume")),
+                "time": str(body.get("chetime") or body.get("dan_chetime") or "").strip(),
+                "raw": body,
+            },
+            "raw": payload,
+        }
+
+    if kind == "orderbook":
+        symbol = _normalize_kr_symbol(str(body.get("shcode") or header.get("tr_key") or ""))
+        return {
+            "status": "ok",
+            "channel": "orderbook",
+            "tr_cd": tr_cd,
+            "symbol": symbol,
+            "orderbook": {
+                "asks": _price_levels(body, price_prefix="offerho", qty_prefix="offerrem"),
+                "bids": _price_levels(body, price_prefix="bidho", qty_prefix="bidrem"),
+                "time": str(body.get("hotime") or body.get("dan_hotime") or "").strip(),
+                "raw": body,
+            },
+            "raw": payload,
+        }
+
+    if kind.startswith("order_"):
+        return {
+            "status": "ok",
+            "channel": kind,
+            "tr_cd": tr_cd,
+            "order": {
+                "account": str(body.get("accno") or body.get("ordacntno") or "").strip(),
+                "symbol": _normalize_kr_symbol(str(body.get("shtnIsuno") or body.get("Isuno") or "")),
+                "order_id": str(body.get("ordno") or "").strip(),
+                "original_order_id": str(body.get("orgordno") or "").strip(),
+                "side": _order_side_from_code(body.get("bnstp")),
+                "order_quantity": _to_float(body.get("ordqty")),
+                "filled_quantity": _to_float(body.get("execqty")),
+                "remaining_quantity": _to_float(body.get("unercqty")),
+                "order_price": _to_float(body.get("ordprc")),
+                "executed_price": _to_float(body.get("execprc")),
+                "raw": body,
+            },
+            "raw": payload,
+        }
+
+    return {
+        "status": "ok",
+        "channel": kind or tr_cd.lower() or "unknown",
+        "tr_cd": tr_cd,
+        "raw": payload,
     }
 
 
@@ -448,6 +663,8 @@ def _normalize_kr_symbol(symbol: str) -> str:
     for suffix in (".KS", ".KQ"):
         if token.endswith(suffix):
             token = token[: -len(suffix)]
+    if len(token) == 7 and token.startswith("A") and token[1:].isdigit():
+        token = token[1:]
     return token
 
 
@@ -492,6 +709,46 @@ def _first_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, list) and value and isinstance(value[0], Mapping):
         return dict(value[0])
     return {}
+
+
+def _websocket_kind(tr_cd: str) -> str:
+    token = str(tr_cd or "").strip()
+    for spec in LS_WEBSOCKET_CHANNELS.values():
+        if spec["tr_cd"] == token:
+            return spec["kind"]
+    if token in {"S3_", "K3_", "NS3", "US3", "DS3", "DK3"}:
+        return "trade"
+    if token in {"H1_", "HA_", "NH1", "UH1", "DH1", "DHA", "B7_"}:
+        return "orderbook"
+    if token.startswith("SC"):
+        return {
+            "SC0": "order_accept",
+            "SC1": "order_execution",
+            "SC2": "order_modify",
+            "SC3": "order_cancel",
+            "SC4": "order_reject",
+        }.get(token, "order_event")
+    return ""
+
+
+def _price_levels(body: Mapping[str, Any], *, price_prefix: str, qty_prefix: str) -> list[dict[str, float | None]]:
+    levels: list[dict[str, float | None]] = []
+    for idx in range(1, 11):
+        price = _to_float(body.get(f"{price_prefix}{idx}"))
+        quantity = _to_float(body.get(f"{qty_prefix}{idx}"))
+        if price is None and quantity is None:
+            continue
+        levels.append({"price": price, "quantity": quantity})
+    return levels
+
+
+def _order_side_from_code(value: Any) -> str:
+    code = str(value or "").strip()
+    if code == "2":
+        return "buy"
+    if code == "1":
+        return "sell"
+    return code
 
 
 def _to_float(value: Any) -> float | None:

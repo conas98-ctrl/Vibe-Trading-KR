@@ -1,8 +1,8 @@
-"""LS and Kiwoom official REST contract tests.
+"""LS and Kiwoom official REST/WebSocket contract tests.
 
-These tests pin the Korean broker REST paths, headers, and body fields found
-in the official LS OpenAPI and Kiwoom OpenAPI guides. They use fake clients so
-they do not require live credentials or network calls.
+These tests pin the Korean broker REST paths, WebSocket endpoints, headers, and
+body fields found in the official LS OpenAPI and Kiwoom OpenAPI guides. They
+use fake clients so they do not require live credentials or network calls.
 """
 
 from __future__ import annotations
@@ -173,6 +173,108 @@ def test_ls_catalog_matches_official_openapi_samples() -> None:
     assert ls.LS_OPENAPI_ENDPOINTS["stock_order"]["tr_cd"] == "CSPAT00601"
     assert ls.LS_OPENAPI_ENDPOINTS["modify_order"]["tr_cd"] == "CSPAT00701"
     assert ls.LS_OPENAPI_ENDPOINTS["cancel_order"]["tr_cd"] == "CSPAT00801"
+
+
+def test_ls_websocket_catalog_matches_official_openapi_guide() -> None:
+    assert ls.LS_WEBSOCKET_URLS == {
+        "paper": "wss://openapi.ls-sec.co.kr:29443",
+        "live": "wss://openapi.ls-sec.co.kr:9443",
+    }
+    assert ls.LS_WEBSOCKET_ENDPOINTS["stock_realtime"]["path"] == "/websocket/stock"
+    assert ls.LS_WEBSOCKET_ENDPOINTS["stock_realtime"]["api_id"] == "9a2800c3-9bf2-4d67-8d83-905074f06646"
+    assert len(ls.LS_STOCK_WEBSOCKET_TRS) == 65
+    assert ls.LS_STOCK_WEBSOCKET_TRS["H1_"] == "KOSPI호가잔량"
+    assert ls.LS_STOCK_WEBSOCKET_TRS["HA_"] == "KOSDAQ호가잔량"
+    assert ls.LS_STOCK_WEBSOCKET_TRS["S3_"] == "KOSPI체결"
+    assert ls.LS_STOCK_WEBSOCKET_TRS["K3_"] == "KOSDAQ체결"
+    assert ls.LS_STOCK_WEBSOCKET_TRS["NS3"] == "(NXT)체결"
+    assert ls.LS_STOCK_WEBSOCKET_TRS["US3"] == "(통합)체결"
+    assert ls.LS_STOCK_WEBSOCKET_TRS["SC0"] == "주식주문접수"
+    assert ls.LS_STOCK_WEBSOCKET_TRS["SC1"] == "주식주문체결"
+    assert ls.LS_STOCK_WEBSOCKET_TRS["SC4"] == "주식주문거부"
+    assert ls.LS_WEBSOCKET_CHANNELS["kospi_trade"]["tr_cd"] == "S3_"
+    assert ls.LS_WEBSOCKET_CHANNELS["kosdaq_orderbook"]["tr_cd"] == "HA_"
+    assert ls.LS_WEBSOCKET_CHANNELS["stock_order_accept"]["tr_type"] == "1"
+
+
+def test_ls_websocket_url_and_subscribe_message_shape() -> None:
+    cfg = _ls_cfg().with_overrides(access_token="token-ls")
+    assert ls.websocket_url(cfg) == "wss://openapi.ls-sec.co.kr:29443/websocket/stock"
+    assert ls.websocket_url(_ls_cfg(profile="live-readonly")) == "wss://openapi.ls-sec.co.kr:9443/websocket/stock"
+
+    assert ls.build_websocket_subscribe_message("005930.KS", channel="kospi_trade", config=cfg) == {
+        "header": {"token": "token-ls", "tr_type": "3"},
+        "body": {"tr_cd": "S3_", "tr_key": "005930"},
+    }
+    assert ls.build_websocket_subscribe_message("035720.KQ", channel="kosdaq_orderbook", config=cfg) == {
+        "header": {"token": "token-ls", "tr_type": "3"},
+        "body": {"tr_cd": "HA_", "tr_key": "035720"},
+    }
+    assert ls.build_websocket_subscribe_message("", channel="stock_order_execution", config=cfg) == {
+        "header": {"token": "token-ls", "tr_type": "1"},
+        "body": {"tr_cd": "SC1", "tr_key": ""},
+    }
+
+
+def test_ls_websocket_parser_normalizes_trade_orderbook_and_order_events() -> None:
+    trade = ls.parse_websocket_message(
+        {
+            "header": {"tr_cd": "S3_", "tr_key": "005930"},
+            "body": {
+                "shcode": "005930",
+                "price": "70000",
+                "change": "1000",
+                "drate": "1.45",
+                "cvolume": "15",
+                "volume": "123456",
+                "chetime": "153000",
+            },
+        }
+    )
+    orderbook = ls.parse_websocket_message(
+        {
+            "header": {"tr_cd": "HA_", "tr_key": "035720"},
+            "body": {
+                "shcode": "035720",
+                "offerho1": "50000",
+                "offerrem1": "10",
+                "bidho1": "49950",
+                "bidrem1": "8",
+                "hotime": "090001",
+            },
+        }
+    )
+    order_event = ls.parse_websocket_message(
+        {
+            "header": {"tr_cd": "SC1"},
+            "body": {
+                "ordno": "86382",
+                "shtnIsuno": "A005930",
+                "ordqty": "2",
+                "execqty": "1",
+                "unercqty": "1",
+                "ordprc": "60000",
+                "execprc": "60000",
+                "bnstp": "2",
+            },
+        }
+    )
+
+    assert trade["status"] == "ok"
+    assert trade["channel"] == "trade"
+    assert trade["symbol"] == "005930"
+    assert trade["quote"]["last"] == 70000.0
+    assert trade["quote"]["trade_volume"] == 15.0
+    assert orderbook["status"] == "ok"
+    assert orderbook["channel"] == "orderbook"
+    assert orderbook["orderbook"]["asks"][0] == {"price": 50000.0, "quantity": 10.0}
+    assert orderbook["orderbook"]["bids"][0] == {"price": 49950.0, "quantity": 8.0}
+    assert order_event["status"] == "ok"
+    assert order_event["channel"] == "order_execution"
+    assert order_event["order"]["order_id"] == "86382"
+    assert order_event["order"]["symbol"] == "005930"
+    assert order_event["order"]["side"] == "buy"
+    assert order_event["order"]["filled_quantity"] == 1.0
 
 
 def test_ls_quote_requests_token_and_official_t1101_contract() -> None:
