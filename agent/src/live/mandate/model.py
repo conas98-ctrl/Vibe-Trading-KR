@@ -21,6 +21,9 @@ class InstrumentType(str, Enum):
     ETF = "etf"
     OPTION = "option"
     CRYPTO = "crypto"
+    FUTURE = "future"
+    BOND = "bond"
+    ELW = "elw"
 
 
 class AssetClass(str, Enum):
@@ -30,6 +33,11 @@ class AssetClass(str, Enum):
     US_ETF = "us_etf"
     HK_EQUITY = "hk_equity"
     CN_EQUITY = "cn_equity"
+    KR_EQUITY = "kr_equity"
+    KR_ETF = "kr_etf"
+    KR_DERIVATIVE = "kr_derivative"
+    KR_BOND = "kr_bond"
+    KR_ELW = "kr_elw"
     CRYPTO = "crypto"
 
 

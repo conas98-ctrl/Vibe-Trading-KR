@@ -8,8 +8,13 @@ from pathlib import Path
 from src.config.paths import get_runtime_root
 from src.trading.connectors.alpaca.profiles import ALPACA_PROFILES
 from src.trading.connectors.binance.profiles import BINANCE_PROFILES
+from src.trading.connectors.daishin_cybos.profiles import DAISHIN_CYBOS_PROFILES
 from src.trading.connectors.futu.profiles import FUTU_PROFILES
 from src.trading.connectors.ibkr.profiles import IBKR_PROFILES
+from src.trading.connectors.kis.profiles import KIS_PROFILES
+from src.trading.connectors.kiwoom.profiles import KIWOOM_PROFILES
+from src.trading.connectors.kiwoom_openapi.profiles import KIWOOM_OPENAPI_PROFILES
+from src.trading.connectors.ls.profiles import LS_PROFILES
 from src.trading.connectors.longbridge.profiles import LONGBRIDGE_PROFILES
 from src.trading.connectors.okx.profiles import OKX_PROFILES
 from src.trading.connectors.robinhood.profiles import ROBINHOOD_PROFILES
@@ -28,6 +33,11 @@ BUILTIN_PROFILES: tuple[TradingProfile, ...] = (
     *OKX_PROFILES,
     *BINANCE_PROFILES,
     *FUTU_PROFILES,
+    *KIS_PROFILES,
+    *LS_PROFILES,
+    *KIWOOM_PROFILES,
+    *KIWOOM_OPENAPI_PROFILES,
+    *DAISHIN_CYBOS_PROFILES,
 )
 
 

@@ -9,7 +9,7 @@ from src.trading.types import TradingProfile
 
 RUNNER_CAPABILITY = "runner.manage.requires_mandate"
 
-#: Direct-SDK connectors (``broker_sdk`` transport) → their connector module.
+#: Direct-SDK and local bridge connectors → their connector module.
 #: Each module exposes a uniform read interface (``build_config``, ``check_status``,
 #: ``get_account_snapshot``, ``get_positions``, ``get_open_orders``, ``get_quote``,
 #: ``get_historical_bars``).
@@ -20,6 +20,11 @@ _SDK_CONNECTOR_MODULES = {
     "okx": "src.trading.connectors.okx.sdk",
     "binance": "src.trading.connectors.binance.sdk",
     "futu": "src.trading.connectors.futu.sdk",
+    "kis": "src.trading.connectors.kis.sdk",
+    "ls": "src.trading.connectors.ls.sdk",
+    "kiwoom": "src.trading.connectors.kiwoom.sdk",
+    "kiwoom-openapi": "src.trading.connectors.kiwoom_openapi.sdk",
+    "daishin-cybos": "src.trading.connectors.daishin_cybos.sdk",
 }
 
 
@@ -47,7 +52,7 @@ def check_connection(profile_id: str | None = None, **overrides: Any) -> dict[st
         report["transport"] = profile.transport
         return report
 
-    if profile.transport == "broker_sdk":
+    if profile.transport in ("broker_sdk", "local_bridge"):
         module = _sdk_module(profile.connector)
         report = module.check_status(module.build_config(profile.config, overrides))
         report["profile_id"] = profile.id
@@ -66,7 +71,7 @@ def get_account(profile_id: str | None = None, **overrides: Any) -> dict[str, An
         from src.trading.connectors.ibkr.local import get_account_snapshot
 
         return _with_profile(profile, get_account_snapshot(_ibkr_config(profile, overrides)))
-    if profile.transport == "broker_sdk":
+    if profile.transport in ("broker_sdk", "local_bridge"):
         module = _sdk_module(profile.connector)
         return _with_profile(profile, module.get_account_snapshot(module.build_config(profile.config, overrides)))
     return _call_remote(profile, "account", {})
@@ -79,7 +84,7 @@ def get_positions(profile_id: str | None = None, **overrides: Any) -> dict[str, 
         from src.trading.connectors.ibkr.local import get_positions as _get_positions
 
         return _with_profile(profile, _get_positions(_ibkr_config(profile, overrides)))
-    if profile.transport == "broker_sdk":
+    if profile.transport in ("broker_sdk", "local_bridge"):
         module = _sdk_module(profile.connector)
         return _with_profile(profile, module.get_positions(module.build_config(profile.config, overrides)))
     return _call_remote(profile, "positions", {})
@@ -100,7 +105,7 @@ def get_open_orders(
             profile,
             _get_open_orders(_ibkr_config(profile, overrides), include_executions=include_executions),
         )
-    if profile.transport == "broker_sdk":
+    if profile.transport in ("broker_sdk", "local_bridge"):
         module = _sdk_module(profile.connector)
         return _with_profile(
             profile,
@@ -133,7 +138,7 @@ def get_quote(
                 sec_type=sec_type,
             ),
         )
-    if profile.transport == "broker_sdk":
+    if profile.transport in ("broker_sdk", "local_bridge"):
         module = _sdk_module(profile.connector)
         return _with_profile(profile, module.get_quote(symbol, config=module.build_config(profile.config, overrides)))
     return _call_remote(profile, "quote", {"symbols": [symbol], "symbol": symbol})
@@ -179,7 +184,7 @@ def get_history(
                 use_rth=use_rth,
             ),
         )
-    if profile.transport == "broker_sdk":
+    if profile.transport in ("broker_sdk", "local_bridge"):
         module = _sdk_module(profile.connector)
         return _with_profile(
             profile,
@@ -199,6 +204,11 @@ _CONNECTOR_INSTRUMENT = {
     "okx": ("crypto", "crypto"),
     "binance": ("crypto", "crypto"),
     "alpaca": ("equity", "us_equity"),
+    "kis": ("equity", "kr_equity"),
+    "ls": ("equity", "kr_equity"),
+    "kiwoom": ("equity", "kr_equity"),
+    "kiwoom-openapi": ("equity", "kr_equity"),
+    "daishin-cybos": ("equity", "kr_equity"),
     "tiger": ("equity", None),
     "longbridge": ("equity", None),
     "futu": ("equity", None),
@@ -229,6 +239,12 @@ def _order_classification(connector: str, symbol: str):
         return instrument, AssetClass.US_EQUITY
     if token.startswith(("CN.", "SH.", "SZ.")) or token.endswith((".SH", ".SS", ".SZ")):
         return instrument, AssetClass.CN_EQUITY
+    if (
+        token.startswith(("KR.", "KRX:"))
+        or token.endswith((".KS", ".KQ"))
+        or (token.isdigit() and len(token) == 6)
+    ):
+        return instrument, AssetClass.KR_EQUITY
     return instrument, None
 
 
