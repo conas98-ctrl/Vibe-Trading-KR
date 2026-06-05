@@ -27,6 +27,9 @@ from src.trading.connectors.alpaca.classification import ALPACA_TOOL_CLASS
 from src.trading.connectors.binance.classification import BINANCE_TOOL_CLASS
 from src.trading.connectors.futu.classification import FUTU_TOOL_CLASS
 from src.trading.connectors.ibkr.classification import IBKR_TOOL_CLASS
+from src.trading.connectors.kis.classification import KIS_TOOL_CLASS
+from src.trading.connectors.kiwoom.classification import KIWOOM_TOOL_CLASS
+from src.trading.connectors.ls.classification import LS_TOOL_CLASS
 from src.trading.connectors.longbridge.classification import LONGBRIDGE_TOOL_CLASS
 from src.trading.connectors.okx.classification import OKX_TOOL_CLASS
 from src.trading.connectors.robinhood.classification import ROBINHOOD_TOOL_CLASS
@@ -47,6 +50,9 @@ _BROKER_CURATED_MAPS = {
     "okx": OKX_TOOL_CLASS,
     "binance": BINANCE_TOOL_CLASS,
     "futu": FUTU_TOOL_CLASS,
+    "kis": KIS_TOOL_CLASS,
+    "ls": LS_TOOL_CLASS,
+    "kiwoom": KIWOOM_TOOL_CLASS,
 }
 
 

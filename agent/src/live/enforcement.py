@@ -58,6 +58,11 @@ _ASSET_CLASS_MARKET: dict[AssetClass, str] = {
     AssetClass.US_EQUITY: "us_equity",
     AssetClass.US_ETF: "us_equity",
     AssetClass.HK_EQUITY: "hk_equity",
+    AssetClass.KR_EQUITY: "kr_equity",
+    AssetClass.KR_ETF: "kr_equity",
+    AssetClass.KR_DERIVATIVE: "kr_derivative",
+    AssetClass.KR_BOND: "kr_bond",
+    AssetClass.KR_ELW: "kr_elw",
     AssetClass.CRYPTO: "crypto",
     # CN_EQUITY has no loader market wired here, so market-cap / liquidity floors
     # for A-shares fail closed (deny) rather than wave through — intentional. If
@@ -77,6 +82,9 @@ _INSTRUMENT_ASSET_CLASS: dict[InstrumentType, AssetClass] = {
     InstrumentType.EQUITY: AssetClass.US_EQUITY,
     InstrumentType.ETF: AssetClass.US_ETF,
     InstrumentType.CRYPTO: AssetClass.CRYPTO,
+    InstrumentType.FUTURE: AssetClass.KR_DERIVATIVE,
+    InstrumentType.BOND: AssetClass.KR_BOND,
+    InstrumentType.ELW: AssetClass.KR_ELW,
 }
 
 
