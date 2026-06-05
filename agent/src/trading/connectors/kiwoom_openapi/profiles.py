@@ -20,4 +20,3 @@ KIWOOM_OPENAPI_PROFILES: tuple[TradingProfile, ...] = (
         ),
     ),
 )
-

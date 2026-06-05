@@ -1,2 +1,1 @@
 """LS Securities OpenAPI connector."""
-

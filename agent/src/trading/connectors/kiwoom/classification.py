@@ -13,4 +13,3 @@ KIWOOM_TOOL_CLASS: dict[str, ToolClass] = {
     "kt10001": ToolClass.WRITE,
     "kt10002": ToolClass.WRITE,
 }
-
