@@ -7,9 +7,12 @@ from src.live.classification import ToolClass
 KIWOOM_TOOL_CLASS: dict[str, ToolClass] = {
     "ka10001": ToolClass.READ,
     "ka10004": ToolClass.READ,
+    "ka10075": ToolClass.READ,
     "ka10080": ToolClass.READ,
+    "ka10081": ToolClass.READ,
     "kt00018": ToolClass.READ,
     "kt10000": ToolClass.WRITE,
     "kt10001": ToolClass.WRITE,
     "kt10002": ToolClass.WRITE,
+    "kt10003": ToolClass.WRITE,
 }
