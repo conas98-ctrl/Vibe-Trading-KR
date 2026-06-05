@@ -15,4 +15,3 @@ KIS_TOOL_CLASS: dict[str, ToolClass] = {
     "order_rvsecncl": ToolClass.WRITE,
     "order_credit": ToolClass.WRITE,
 }
-

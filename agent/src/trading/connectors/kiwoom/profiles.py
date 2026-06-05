@@ -50,4 +50,3 @@ KIWOOM_PROFILES: tuple[TradingProfile, ...] = (
         notes="Live Kiwoom REST orders must pass Vibe-Trading mandate, kill switch, pre-trade, and audit gates.",
     ),
 )
-

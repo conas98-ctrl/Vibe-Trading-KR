@@ -87,4 +87,3 @@ def place_order(config: KoreanConnectorConfig | None = None, **_: Any) -> dict[s
 
 def cancel_order(config: KoreanConnectorConfig | None = None, order_id: str = "", **_: Any) -> dict[str, Any]:
     return unsupported_or_unconfigured(config or load_config(), label=LABEL, operation=f"cancel order {order_id}")
-
