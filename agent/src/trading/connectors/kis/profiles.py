@@ -50,4 +50,3 @@ KIS_PROFILES: tuple[TradingProfile, ...] = (
         notes="Live KIS orders must pass Vibe-Trading mandate, kill switch, pre-trade, and audit gates.",
     ),
 )
-

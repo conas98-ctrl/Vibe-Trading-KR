@@ -1,2 +1,1 @@
 """Kiwoom REST OpenAPI connector."""
-

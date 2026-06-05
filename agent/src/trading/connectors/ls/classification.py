@@ -13,4 +13,3 @@ LS_TOOL_CLASS: dict[str, ToolClass] = {
     "cancel_order": ToolClass.WRITE,
     "modify_order": ToolClass.WRITE,
 }
-

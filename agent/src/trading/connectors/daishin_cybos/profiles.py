@@ -20,4 +20,3 @@ DAISHIN_CYBOS_PROFILES: tuple[TradingProfile, ...] = (
         ),
     ),
 )
-
