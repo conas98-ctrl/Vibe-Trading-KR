@@ -22,6 +22,7 @@ from src.trading.connectors.nh_qv.profiles import NH_QV_PROFILES
 from src.trading.connectors.okx.profiles import OKX_PROFILES
 from src.trading.connectors.robinhood.profiles import ROBINHOOD_PROFILES
 from src.trading.connectors.tiger.profiles import TIGER_PROFILES
+from src.trading.connectors.toss.profiles import TOSS_PROFILES
 from src.trading.connectors.yuanta_tradar.profiles import YUANTA_TRADAR_PROFILES
 from src.trading.types import TradingProfile
 
@@ -39,6 +40,7 @@ BUILTIN_PROFILES: tuple[TradingProfile, ...] = (
     *FUTU_PROFILES,
     *KIS_PROFILES,
     *LS_PROFILES,
+    *TOSS_PROFILES,
     *DB_PROFILES,
     *KIWOOM_PROFILES,
     *KIWOOM_OPENAPI_PROFILES,

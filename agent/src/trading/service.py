@@ -22,6 +22,7 @@ _SDK_CONNECTOR_MODULES = {
     "futu": "src.trading.connectors.futu.sdk",
     "kis": "src.trading.connectors.kis.sdk",
     "ls": "src.trading.connectors.ls.sdk",
+    "toss": "src.trading.connectors.toss.sdk",
     "db": "src.trading.connectors.db.sdk",
     "kiwoom": "src.trading.connectors.kiwoom.sdk",
     "kiwoom-openapi": "src.trading.connectors.kiwoom_openapi.sdk",
@@ -210,6 +211,7 @@ _CONNECTOR_INSTRUMENT = {
     "alpaca": ("equity", "us_equity"),
     "kis": ("equity", "kr_equity"),
     "ls": ("equity", "kr_equity"),
+    "toss": ("equity", None),
     "db": ("equity", "kr_equity"),
     "kiwoom": ("equity", "kr_equity"),
     "kiwoom-openapi": ("equity", "kr_equity"),
@@ -252,6 +254,8 @@ def _order_classification(connector: str, symbol: str):
         or (token.isdigit() and len(token) == 6)
     ):
         return instrument, AssetClass.KR_EQUITY
+    if connector == "toss":
+        return instrument, AssetClass.US_EQUITY
     return instrument, None
 
 

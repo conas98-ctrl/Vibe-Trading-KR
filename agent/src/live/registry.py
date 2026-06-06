@@ -34,6 +34,7 @@ from src.trading.connectors.longbridge.classification import LONGBRIDGE_TOOL_CLA
 from src.trading.connectors.okx.classification import OKX_TOOL_CLASS
 from src.trading.connectors.robinhood.classification import ROBINHOOD_TOOL_CLASS
 from src.trading.connectors.tiger.classification import TIGER_TOOL_CLASS
+from src.trading.connectors.toss.classification import TOSS_TOOL_CLASS
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ _BROKER_CURATED_MAPS = {
     "futu": FUTU_TOOL_CLASS,
     "kis": KIS_TOOL_CLASS,
     "ls": LS_TOOL_CLASS,
+    "toss": TOSS_TOOL_CLASS,
     "kiwoom": KIWOOM_TOOL_CLASS,
 }
 
