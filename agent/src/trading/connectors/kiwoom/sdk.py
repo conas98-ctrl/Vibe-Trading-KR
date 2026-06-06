@@ -86,6 +86,48 @@ KIWOOM_WEBSOCKET_ENDPOINTS: dict[str, dict[str, str]] = {
     },
 }
 
+KIWOOM_WEBSOCKET_CONDITION_TRS: dict[str, dict[str, str]] = {
+    "condition_list": {
+        "api_id": "ka10171",
+        "trnm": "CNSRLST",
+        "description": "조건검색 목록조회",
+    },
+}
+
+
+KIWOOM_WEBSOCKET_CONDITION_REQUEST_TRS: dict[str, dict[str, str]] = {
+    "general": {
+        "api_id": "ka10172",
+        "trnm": "CNSRREQ",
+        "search_type": "0",
+        "stex_tp": "K",
+        "description": "조건검색 요청 일반",
+    },
+}
+
+
+KIWOOM_WEBSOCKET_CONDITION_REALTIME_TRS: dict[str, dict[str, str]] = {
+    "subscribe": {
+        "api_id": "ka10173",
+        "trnm": "CNSRREQ",
+        "search_type": "1",
+        "stex_tp": "K",
+        "realtime_trnm": "REAL",
+        "description": "조건검색 요청 실시간",
+    },
+}
+
+
+KIWOOM_WEBSOCKET_CONDITION_UNSUBSCRIBE_TRS: dict[str, dict[str, str]] = {
+    "unsubscribe": {
+        "api_id": "ka10174",
+        "method": "POST",
+        "path": "/api/dostk/websocket",
+        "trnm": "CNSRCLR",
+        "description": "조건검색 실시간 해제",
+    },
+}
+
 KIWOOM_WEBSOCKET_REALTIME_TYPES: dict[str, str] = {
     "00": "주문체결",
     "04": "잔고",
@@ -356,9 +398,19 @@ def check_status(config: KoreanConnectorConfig | None = None) -> dict[str, Any]:
     report["auth_probe"] = "not_run"
     report["auth_probe_reason"] = "Kiwoom token issuance is deferred until an explicit read/order call."
     realtime_types = ",".join(KIWOOM_WEBSOCKET_REALTIME_TYPES)
+    condition_apis = ",".join(
+        f"websocket:{spec['api_id']}"
+        for catalog in (
+            KIWOOM_WEBSOCKET_CONDITION_TRS,
+            KIWOOM_WEBSOCKET_CONDITION_REQUEST_TRS,
+            KIWOOM_WEBSOCKET_CONDITION_REALTIME_TRS,
+            KIWOOM_WEBSOCKET_CONDITION_UNSUBSCRIBE_TRS,
+        )
+        for spec in catalog.values()
+    )
     report["official_catalog"] = (
         "ka10001,ka10081,kt00018,ka10075,kt10000,kt10001,kt10002,kt10003,"
-        f"websocket:{realtime_types}"
+        f"websocket:{realtime_types},{condition_apis}"
     )
     return report
 
@@ -396,6 +448,136 @@ def build_websocket_subscribe_frame(
         "refresh": "1" if refresh else "0",
         "data": [{"item": items, "type": type_codes}],
     }
+
+
+def build_websocket_condition_list_frame() -> dict[str, str]:
+    return {"trnm": KIWOOM_WEBSOCKET_CONDITION_TRS["condition_list"]["trnm"]}
+
+
+def parse_websocket_condition_list(message: Mapping[str, Any]) -> list[dict[str, str]]:
+    expected_trnm = KIWOOM_WEBSOCKET_CONDITION_TRS["condition_list"]["trnm"]
+    trnm = str(message.get("trnm") or "").strip()
+    if trnm != expected_trnm:
+        raise KoreanConnectorConfigError(f"Kiwoom WebSocket condition list expected {expected_trnm}, got {trnm or 'missing'}.")
+    if str(message.get("return_code", 0)).strip() not in {"0", ""}:
+        reason = str(message.get("return_msg") or "unknown error").strip()
+        raise KoreanConnectorConfigError(f"Kiwoom WebSocket condition list failed: {reason}.")
+
+    conditions: list[dict[str, str]] = []
+    data = message.get("data")
+    rows = data if isinstance(data, list) else [data] if isinstance(data, Mapping) else []
+    for row in rows:
+        if isinstance(row, (list, tuple)) and len(row) >= 2:
+            conditions.append({"seq": str(row[0]).strip(), "name": str(row[1]).strip()})
+        elif isinstance(row, Mapping):
+            conditions.append({"seq": str(row.get("seq") or "").strip(), "name": str(row.get("name") or "").strip()})
+    return conditions
+
+
+def build_websocket_condition_request_frame(
+    seq: int | str,
+    *,
+    cont_yn: str = "N",
+    next_key: str = "",
+    exchange: str = "K",
+) -> dict[str, str]:
+    request = KIWOOM_WEBSOCKET_CONDITION_REQUEST_TRS["general"]
+    clean_seq = str(seq or "").strip()
+    if not clean_seq:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket condition request frame requires condition sequence.")
+    clean_exchange = str(exchange or "").strip().upper()
+    if clean_exchange != request["stex_tp"]:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket condition request only pins KRX exchange `K`.")
+    clean_cont_yn = str(cont_yn or "N").strip().upper()
+    if clean_cont_yn not in {"Y", "N"}:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket condition request cont_yn must be `Y` or `N`.")
+    return {
+        "trnm": request["trnm"],
+        "seq": clean_seq,
+        "search_type": request["search_type"],
+        "stex_tp": request["stex_tp"],
+        "cont_yn": clean_cont_yn,
+        "next_key": str(next_key or "").strip(),
+    }
+
+
+def parse_websocket_condition_request_response(message: Mapping[str, Any]) -> dict[str, Any]:
+    expected_trnm = KIWOOM_WEBSOCKET_CONDITION_REQUEST_TRS["general"]["trnm"]
+    trnm = str(message.get("trnm") or "").strip().upper()
+    if trnm != expected_trnm:
+        raise KoreanConnectorConfigError(f"Kiwoom WebSocket condition request expected {expected_trnm}, got {trnm or 'missing'}.")
+    if str(message.get("return_code", "0")).strip() not in {"0", ""}:
+        reason = str(message.get("return_msg") or "unknown error").strip()
+        raise KoreanConnectorConfigError(f"Kiwoom WebSocket condition request failed: {reason}.")
+    return {
+        "seq": str(message.get("seq") or "").strip(),
+        "cont_yn": str(message.get("cont_yn") or "").strip(),
+        "next_key": str(message.get("next_key") or "").strip(),
+        "results": [_condition_result_to_dict(item) for item in _as_list(message.get("data"))],
+        "raw": dict(message),
+    }
+
+
+def build_websocket_condition_realtime_frame(seq: int | str, *, exchange: str = "K") -> dict[str, str]:
+    request = KIWOOM_WEBSOCKET_CONDITION_REALTIME_TRS["subscribe"]
+    clean_seq = str(seq or "").strip()
+    if not clean_seq:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket condition realtime frame requires condition sequence.")
+    clean_exchange = str(exchange or "").strip().upper()
+    if clean_exchange != request["stex_tp"]:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket condition realtime request only pins KRX exchange `K`.")
+    return {
+        "trnm": request["trnm"],
+        "seq": clean_seq,
+        "search_type": request["search_type"],
+        "stex_tp": request["stex_tp"],
+    }
+
+
+def parse_websocket_condition_realtime_response(message: Mapping[str, Any]) -> dict[str, Any]:
+    expected_trnm = KIWOOM_WEBSOCKET_CONDITION_REALTIME_TRS["subscribe"]["trnm"]
+    trnm = str(message.get("trnm") or "").strip().upper()
+    if trnm != expected_trnm:
+        raise KoreanConnectorConfigError(f"Kiwoom WebSocket condition realtime request expected {expected_trnm}, got {trnm or 'missing'}.")
+    if str(message.get("return_code", "0")).strip() not in {"0", ""}:
+        reason = str(message.get("return_msg") or "unknown error").strip()
+        raise KoreanConnectorConfigError(f"Kiwoom WebSocket condition realtime request failed: {reason}.")
+    raw_symbols = [str(item.get("jmcode") or "").strip() for item in _as_list(message.get("data")) if str(item.get("jmcode") or "").strip()]
+    return {
+        "seq": str(message.get("seq") or "").strip(),
+        "symbols": [_normalize_position_symbol(symbol) for symbol in raw_symbols],
+        "raw_symbols": raw_symbols,
+        "raw": dict(message),
+    }
+
+
+def parse_websocket_condition_realtime_message(message: Mapping[str, Any]) -> list[dict[str, Any]]:
+    expected_trnm = KIWOOM_WEBSOCKET_CONDITION_REALTIME_TRS["subscribe"]["realtime_trnm"]
+    trnm = str(message.get("trnm") or "").strip().upper()
+    if trnm != expected_trnm:
+        raise KoreanConnectorConfigError(f"Kiwoom WebSocket condition realtime message expected {expected_trnm}, got {trnm or 'missing'}.")
+    return [_condition_realtime_to_dict(item) for item in _as_list(message.get("data"))]
+
+
+def build_websocket_condition_unsubscribe_frame(seq: str | int) -> dict[str, str]:
+    condition_seq = str(seq or "").strip()
+    if not condition_seq:
+        raise KoreanConnectorConfigError("Kiwoom condition unsubscribe frame requires condition sequence.")
+    return {"trnm": KIWOOM_WEBSOCKET_CONDITION_UNSUBSCRIBE_TRS["unsubscribe"]["trnm"], "seq": condition_seq}
+
+
+def parse_websocket_condition_unsubscribe_response(message: Mapping[str, Any]) -> dict[str, Any]:
+    expected_trnm = KIWOOM_WEBSOCKET_CONDITION_UNSUBSCRIBE_TRS["unsubscribe"]["trnm"]
+    trnm = str(message.get("trnm") or "").strip().upper()
+    if trnm != expected_trnm:
+        raise KoreanConnectorConfigError(f"unexpected Kiwoom condition unsubscribe TR: {trnm or 'missing'}.")
+    if str(message.get("return_code", "")).strip() != "0":
+        reason = str(message.get("return_msg") or "unknown error").strip()
+        raise KoreanConnectorConfigError(f"Kiwoom condition unsubscribe failed: {reason}")
+    seq = str(message.get("seq") or "").strip()
+    if not seq:
+        raise KoreanConnectorConfigError("Kiwoom condition unsubscribe response requires condition sequence.")
+    return {"status": "ok", "seq": seq, "raw": dict(message)}
 
 
 def websocket_control_reply(message: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -979,6 +1161,41 @@ def _open_order_to_dict(item: Mapping[str, Any]) -> dict[str, Any]:
         "quantity": _to_float(item.get("ord_qty")),
         "limit_price": _to_float(item.get("ord_pric")),
         "remaining_quantity": _to_float(item.get("oso_qty")),
+        "raw": dict(item),
+    }
+
+
+def _condition_result_to_dict(item: Mapping[str, Any]) -> dict[str, Any]:
+    raw_symbol = str(item.get("9001") or "").strip()
+    return {
+        "symbol": _normalize_position_symbol(raw_symbol),
+        "raw_symbol": raw_symbol,
+        "name": str(item.get("302") or "").strip(),
+        "current_price": str(item.get("10") or "").strip(),
+        "change_sign": str(item.get("25") or "").strip(),
+        "change": str(item.get("11") or "").strip(),
+        "change_rate": str(item.get("12") or "").strip(),
+        "volume": str(item.get("13") or "").strip(),
+        "open": str(item.get("16") or "").strip(),
+        "high": str(item.get("17") or "").strip(),
+        "low": str(item.get("18") or "").strip(),
+        "raw": dict(item),
+    }
+
+
+def _condition_realtime_to_dict(item: Mapping[str, Any]) -> dict[str, Any]:
+    values = item.get("values")
+    clean_values = dict(values) if isinstance(values, Mapping) else {}
+    raw_symbol = str(clean_values.get("9001") or item.get("name") or "").strip()
+    return {
+        "type": str(item.get("type") or "").strip(),
+        "name": str(item.get("name") or "").strip(),
+        "seq": str(clean_values.get("841") or "").strip(),
+        "symbol": _normalize_position_symbol(raw_symbol),
+        "action": str(clean_values.get("843") or "").strip(),
+        "trade_time": str(clean_values.get("20") or "").strip(),
+        "side": str(clean_values.get("907") or "").strip(),
+        "values": clean_values,
         "raw": dict(item),
     }
 

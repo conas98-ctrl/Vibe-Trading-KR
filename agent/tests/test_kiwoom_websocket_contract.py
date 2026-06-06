@@ -24,6 +24,266 @@ def test_kiwoom_websocket_catalog_matches_official_realtime_sample() -> None:
     assert endpoint["sample_type"] == "0B"
 
 
+def test_kiwoom_websocket_condition_list_contract_matches_official_sample() -> None:
+    assert kiwoom.KIWOOM_WEBSOCKET_CONDITION_TRS["condition_list"] == {
+        "api_id": "ka10171",
+        "trnm": "CNSRLST",
+        "description": "조건검색 목록조회",
+    }
+    assert kiwoom.build_websocket_condition_list_frame() == {"trnm": "CNSRLST"}
+
+    parsed = kiwoom.parse_websocket_condition_list(
+        {
+            "trnm": "CNSRLST",
+            "return_code": 0,
+            "return_msg": "",
+            "data": [["0", "조건1"], ["1", "조건2"]],
+        }
+    )
+
+    assert parsed == [{"seq": "0", "name": "조건1"}, {"seq": "1", "name": "조건2"}]
+
+    with pytest.raises(kiwoom.KoreanConnectorConfigError, match="condition list failed"):
+        kiwoom.parse_websocket_condition_list({"trnm": "CNSRLST", "return_code": 1, "return_msg": "bad request"})
+
+
+def test_kiwoom_websocket_condition_request_contract_matches_official_sample() -> None:
+    request = kiwoom.KIWOOM_WEBSOCKET_CONDITION_REQUEST_TRS["general"]
+
+    assert request == {
+        "api_id": "ka10172",
+        "trnm": "CNSRREQ",
+        "search_type": "0",
+        "stex_tp": "K",
+        "description": "조건검색 요청 일반",
+    }
+    assert kiwoom.build_websocket_condition_request_frame("4") == {
+        "trnm": "CNSRREQ",
+        "seq": "4",
+        "search_type": "0",
+        "stex_tp": "K",
+        "cont_yn": "N",
+        "next_key": "",
+    }
+
+    parsed = kiwoom.parse_websocket_condition_request_response(
+        {
+            "trnm": "CNSRREQ",
+            "seq": "4",
+            "cont_yn": "Y",
+            "next_key": "next-key",
+            "return_code": 0,
+            "return_msg": "",
+            "data": [
+                {
+                    "9001": "A005930",
+                    "302": "삼성전자",
+                    "10": "+000071000",
+                    "25": "2",
+                    "11": "+000001000",
+                    "12": "000001500",
+                    "13": "000123456",
+                    "16": "+000070000",
+                    "17": "+000072000",
+                    "18": "+000069000",
+                }
+            ],
+        }
+    )
+
+    assert parsed == {
+        "seq": "4",
+        "cont_yn": "Y",
+        "next_key": "next-key",
+        "results": [
+            {
+                "symbol": "005930",
+                "raw_symbol": "A005930",
+                "name": "삼성전자",
+                "current_price": "+000071000",
+                "change_sign": "2",
+                "change": "+000001000",
+                "change_rate": "000001500",
+                "volume": "000123456",
+                "open": "+000070000",
+                "high": "+000072000",
+                "low": "+000069000",
+                "raw": {
+                    "9001": "A005930",
+                    "302": "삼성전자",
+                    "10": "+000071000",
+                    "25": "2",
+                    "11": "+000001000",
+                    "12": "000001500",
+                    "13": "000123456",
+                    "16": "+000070000",
+                    "17": "+000072000",
+                    "18": "+000069000",
+                },
+            }
+        ],
+        "raw": {
+            "trnm": "CNSRREQ",
+            "seq": "4",
+            "cont_yn": "Y",
+            "next_key": "next-key",
+            "return_code": 0,
+            "return_msg": "",
+            "data": [
+                {
+                    "9001": "A005930",
+                    "302": "삼성전자",
+                    "10": "+000071000",
+                    "25": "2",
+                    "11": "+000001000",
+                    "12": "000001500",
+                    "13": "000123456",
+                    "16": "+000070000",
+                    "17": "+000072000",
+                    "18": "+000069000",
+                }
+            ],
+        },
+    }
+
+    with pytest.raises(kiwoom.KoreanConnectorConfigError, match="condition request failed"):
+        kiwoom.parse_websocket_condition_request_response({"trnm": "CNSRREQ", "return_code": 1, "return_msg": "bad seq"})
+
+    with pytest.raises(kiwoom.KoreanConnectorConfigError, match="expected CNSRREQ"):
+        kiwoom.parse_websocket_condition_request_response({"trnm": "CNSRLST", "return_code": 0})
+
+
+def test_kiwoom_websocket_condition_realtime_contract_matches_official_sample() -> None:
+    request = kiwoom.KIWOOM_WEBSOCKET_CONDITION_REALTIME_TRS["subscribe"]
+
+    assert request == {
+        "api_id": "ka10173",
+        "trnm": "CNSRREQ",
+        "search_type": "1",
+        "stex_tp": "K",
+        "realtime_trnm": "REAL",
+        "description": "조건검색 요청 실시간",
+    }
+    assert kiwoom.build_websocket_condition_realtime_frame("4") == {
+        "trnm": "CNSRREQ",
+        "seq": "4",
+        "search_type": "1",
+        "stex_tp": "K",
+    }
+
+    registered = kiwoom.parse_websocket_condition_realtime_response(
+        {
+            "trnm": "CNSRREQ",
+            "seq": "4",
+            "return_code": 0,
+            "return_msg": "",
+            "data": [{"jmcode": "A005930"}, {"jmcode": "Q123456"}],
+        }
+    )
+
+    assert registered == {
+        "seq": "4",
+        "symbols": ["005930", "123456"],
+        "raw_symbols": ["A005930", "Q123456"],
+        "raw": {
+            "trnm": "CNSRREQ",
+            "seq": "4",
+            "return_code": 0,
+            "return_msg": "",
+            "data": [{"jmcode": "A005930"}, {"jmcode": "Q123456"}],
+        },
+    }
+
+    realtime = kiwoom.parse_websocket_condition_realtime_message(
+        {
+            "trnm": "REAL",
+            "data": [
+                {
+                    "type": "0A",
+                    "name": "005930",
+                    "values": {
+                        "841": "4",
+                        "9001": "005930",
+                        "843": "I",
+                        "20": "091500",
+                        "907": "2",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert realtime == [
+        {
+            "type": "0A",
+            "name": "005930",
+            "seq": "4",
+            "symbol": "005930",
+            "action": "I",
+            "trade_time": "091500",
+            "side": "2",
+            "values": {
+                "841": "4",
+                "9001": "005930",
+                "843": "I",
+                "20": "091500",
+                "907": "2",
+            },
+            "raw": {
+                "type": "0A",
+                "name": "005930",
+                "values": {
+                    "841": "4",
+                    "9001": "005930",
+                    "843": "I",
+                    "20": "091500",
+                    "907": "2",
+                },
+            },
+        }
+    ]
+
+    with pytest.raises(kiwoom.KoreanConnectorConfigError, match="condition realtime request failed"):
+        kiwoom.parse_websocket_condition_realtime_response({"trnm": "CNSRREQ", "return_code": 1, "return_msg": "bad seq"})
+
+    with pytest.raises(kiwoom.KoreanConnectorConfigError, match="expected REAL"):
+        kiwoom.parse_websocket_condition_realtime_message({"trnm": "CNSRREQ", "return_code": 0})
+
+
+def test_kiwoom_websocket_condition_unsubscribe_contract_matches_official_sample() -> None:
+    unsubscribe = kiwoom.KIWOOM_WEBSOCKET_CONDITION_UNSUBSCRIBE_TRS["unsubscribe"]
+
+    assert unsubscribe == {
+        "api_id": "ka10174",
+        "method": "POST",
+        "path": "/api/dostk/websocket",
+        "trnm": "CNSRCLR",
+        "description": "조건검색 실시간 해제",
+    }
+    assert kiwoom.build_websocket_condition_unsubscribe_frame("1") == {
+        "trnm": "CNSRCLR",
+        "seq": "1",
+    }
+    assert kiwoom.parse_websocket_condition_unsubscribe_response(
+        {"return_code": 0, "return_msg": "", "trnm": "CNSRCLR", "seq": "1"}
+    ) == {
+        "status": "ok",
+        "seq": "1",
+        "raw": {"return_code": 0, "return_msg": "", "trnm": "CNSRCLR", "seq": "1"},
+    }
+
+    with pytest.raises(kiwoom.KoreanConnectorConfigError, match="condition sequence"):
+        kiwoom.build_websocket_condition_unsubscribe_frame("")
+
+    with pytest.raises(kiwoom.KoreanConnectorConfigError, match="unexpected Kiwoom condition unsubscribe TR"):
+        kiwoom.parse_websocket_condition_unsubscribe_response({"return_code": 0, "trnm": "CNSRREQ", "seq": "1"})
+
+    with pytest.raises(kiwoom.KoreanConnectorConfigError, match="Kiwoom condition unsubscribe failed"):
+        kiwoom.parse_websocket_condition_unsubscribe_response(
+            {"return_code": 1, "return_msg": "not registered", "trnm": "CNSRCLR", "seq": "1"}
+        )
+
+
 def test_kiwoom_websocket_realtime_types_match_official_catalog() -> None:
     assert kiwoom.KIWOOM_WEBSOCKET_REALTIME_TYPES["0B"] == "주식체결"
     assert kiwoom.KIWOOM_WEBSOCKET_REALTIME_TYPES["0D"] == "주식호가잔량"
