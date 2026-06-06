@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Iterable
+from typing import Iterable, Protocol
 
 import pandas as pd
 
@@ -50,6 +50,20 @@ class KoreanTradingCalendar:
     ) -> None:
         self.holidays = {_to_date(value) for value in holidays}
         self.extra_closed_days = {_to_date(value) for value in extra_closed_days}
+
+    @classmethod
+    def from_holiday_provider(
+        cls,
+        provider: "HolidayProvider",
+        *,
+        nation_code: str = "KR",
+        extra_closed_days: Iterable[date | str | pd.Timestamp] = (),
+    ) -> "KoreanTradingCalendar":
+        """Build a calendar from a credential-gated official holiday provider."""
+        return cls(
+            holidays=provider.fetch_holidays(nation_code=nation_code),
+            extra_closed_days=extra_closed_days,
+        )
 
     def is_trading_day(self, value: date | str | pd.Timestamp) -> bool:
         """Return whether *value* is an open Korean equity trading day."""
@@ -104,3 +118,27 @@ def _to_date(value: date | str | pd.Timestamp) -> date:
     if isinstance(value, date):
         return value
     return pd.Timestamp(value).date()
+
+
+class HolidayProvider(Protocol):
+    """Provider contract for external Korean market holiday feeds."""
+
+    def fetch_holidays(self, *, nation_code: str = "KR") -> set[date]:
+        """Return holiday dates for the requested country code."""
+        ...
+
+
+@dataclass(frozen=True)
+class KoscomHolidayProvider:
+    """Holiday provider backed by Koscom OpenAPI/CHECK API."""
+
+    loader: HolidayProvider | None = None
+
+    def fetch_holidays(self, *, nation_code: str = "KR") -> set[date]:
+        """Delegate to the Koscom loader while keeping calendar code decoupled."""
+        loader = self.loader
+        if loader is None:
+            from backtest.loaders.koscom import DataLoader
+
+            loader = DataLoader()
+        return loader.fetch_holidays(nation_code=nation_code)

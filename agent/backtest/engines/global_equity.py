@@ -23,7 +23,7 @@ from __future__ import annotations
 import pandas as pd
 
 from backtest.engines.base import BaseEngine
-from backtest.engines.kr_market import KoreanTradingCalendar
+from backtest.engines.kr_market import KoreanTradingCalendar, KoscomHolidayProvider
 
 
 class GlobalEquityEngine(BaseEngine):
@@ -43,6 +43,8 @@ class GlobalEquityEngine(BaseEngine):
       - kr_settlement_lag_bars: default 2 (KRX stock cash settlement)
       - kr_holidays: default [] (KRX holiday dates supplied by caller)
       - kr_extra_closed_days: default [] (KRX-designated closure dates)
+      - kr_holiday_provider: optional official holiday provider object
+      - kr_use_koscom_holidays: default False (requires Koscom API key)
     """
 
     def __init__(self, config: dict, market: str = "us"):
@@ -65,10 +67,19 @@ class GlobalEquityEngine(BaseEngine):
         self.kr_transaction_tax: float = config.get("kr_transaction_tax", 0.0)
         self.kr_allow_short: bool = bool(config.get("kr_allow_short", False))
         self.kr_settlement_lag_bars: int = int(config.get("kr_settlement_lag_bars", 2))
-        self.kr_calendar = KoreanTradingCalendar(
-            holidays=config.get("kr_holidays", ()),
-            extra_closed_days=config.get("kr_extra_closed_days", ()),
-        )
+        kr_holiday_provider = config.get("kr_holiday_provider")
+        if kr_holiday_provider is None and config.get("kr_use_koscom_holidays", False):
+            kr_holiday_provider = KoscomHolidayProvider()
+        if kr_holiday_provider is not None:
+            self.kr_calendar = KoreanTradingCalendar.from_holiday_provider(
+                kr_holiday_provider,
+                extra_closed_days=config.get("kr_extra_closed_days", ()),
+            )
+        else:
+            self.kr_calendar = KoreanTradingCalendar(
+                holidays=config.get("kr_holidays", ()),
+                extra_closed_days=config.get("kr_extra_closed_days", ()),
+            )
         self._kr_unsettled_cash: list[tuple[pd.Timestamp, float]] = []
         self._kr_last_settlement_release_idx: int | None = None
 

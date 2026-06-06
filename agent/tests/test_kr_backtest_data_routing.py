@@ -9,7 +9,7 @@ import pandas as pd
 import backtest.loaders.yfinance_loader as yfinance_loader
 from backtest.benchmark import _infer_market, _resolve_ticker
 from backtest.engines.global_equity import GlobalEquityEngine
-from backtest.engines.kr_market import KoreanTradingCalendar
+from backtest.engines.kr_market import KoreanTradingCalendar, KoscomHolidayProvider
 from backtest.loaders.registry import FALLBACK_CHAINS, LOADER_REGISTRY, resolve_loader
 from backtest.loaders.yfinance_loader import DataLoader, _to_yfinance_symbol
 from backtest.runner import _create_market_engine
@@ -153,6 +153,53 @@ def test_korean_settlement_uses_trading_calendar_holidays() -> None:
     assert snapshots[dates[4]].positions == 1
 
 
+def test_korean_settlement_can_use_live_holiday_provider_contract() -> None:
+    class _Provider:
+        def fetch_holidays(self, *, nation_code: str = "KR"):
+            assert nation_code == "KR"
+            return {pd.Timestamp("2026-01-06").date()}
+
+    engine = GlobalEquityEngine(
+        {
+            "initial_cash": 100_000,
+            "slippage_kr": 0.0,
+            "kr_commission": 0.0,
+            "kr_transaction_tax": 0.0,
+            "kr_holiday_provider": _Provider(),
+        },
+        market="kr",
+    )
+    dates = pd.DatetimeIndex(
+        [
+            "2026-01-02",
+            "2026-01-05",
+            "2026-01-06",
+            "2026-01-07",
+            "2026-01-08",
+        ]
+    )
+    frame = pd.DataFrame(
+        {
+            "open": [10_000, 10_000, 10_000, 10_000, 10_000],
+            "close": [10_000, 10_000, 10_000, 10_000, 10_000],
+            "pre_close": [10_000, 10_000, 10_000, 10_000, 10_000],
+        },
+        index=dates,
+    )
+    close_df = pd.DataFrame(
+        {"005930.KS": [10_000, 10_000, 10_000, 10_000, 10_000]},
+        index=dates,
+    )
+    target_pos = pd.DataFrame({"005930.KS": [1.0, 0.0, 1.0, 1.0, 1.0]}, index=dates)
+
+    engine._execute_bars(dates, {"005930.KS": frame}, close_df, target_pos, ["005930.KS"])
+
+    snapshots = {snapshot.timestamp: snapshot for snapshot in engine.equity_snapshots}
+    assert snapshots[dates[2]].positions == 0
+    assert snapshots[dates[3]].positions == 0
+    assert snapshots[dates[4]].positions == 1
+
+
 def test_korean_calendar_observes_weekends_holidays_and_year_end_closure() -> None:
     calendar = KoreanTradingCalendar(holidays=["2026-01-01"])
 
@@ -160,6 +207,28 @@ def test_korean_calendar_observes_weekends_holidays_and_year_end_closure() -> No
     assert calendar.is_trading_day("2026-01-03") is False
     assert calendar.is_trading_day("2026-01-01") is False
     assert calendar.is_trading_day("2026-12-31") is False
+
+
+def test_korean_calendar_can_load_koscom_holiday_provider() -> None:
+    class _Provider:
+        def fetch_holidays(self, *, nation_code: str = "KR"):
+            assert nation_code == "KR"
+            return {pd.Timestamp("2026-01-06").date()}
+
+    calendar = KoreanTradingCalendar.from_holiday_provider(_Provider())
+
+    assert calendar.is_trading_day("2026-01-06") is False
+
+
+def test_koscom_holiday_provider_delegates_to_loader() -> None:
+    class _Loader:
+        def fetch_holidays(self, *, nation_code: str = "KR"):
+            assert nation_code == "KR"
+            return {pd.Timestamp("2026-01-06").date()}
+
+    provider = KoscomHolidayProvider(loader=_Loader())
+
+    assert provider.fetch_holidays() == {pd.Timestamp("2026-01-06").date()}
 
 
 def test_korean_market_sessions_separate_krx_and_nxt_hours() -> None:

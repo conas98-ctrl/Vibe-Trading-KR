@@ -137,8 +137,8 @@ class TestFallbackChains:
         for market, chain in FALLBACK_CHAINS.items():
             assert len(chain) > 0, f"Fallback chain for {market} is empty"
 
-    def test_kr_equity_prefers_public_yfinance_then_akshare_fallback(self) -> None:
-        assert FALLBACK_CHAINS["kr_equity"] == ["yfinance", "akshare"]
+    def test_kr_equity_prefers_official_krx_koscom_then_public_fallbacks(self) -> None:
+        assert FALLBACK_CHAINS["kr_equity"] == ["krx", "koscom", "yfinance", "akshare"]
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +172,52 @@ class TestResolveLoader:
         with patch.dict(LOADER_REGISTRY, {}, clear=True):
             with pytest.raises(NoAvailableSourceError):
                 resolve_loader("martian_stocks")
+
+    def test_kr_equity_falls_back_when_krx_auth_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from backtest.loaders.koscom import DataLoader as KoscomLoader
+        from backtest.loaders.krx import DataLoader as KrxLoader
+        from backtest.loaders.yfinance_loader import DataLoader as YfinanceLoader
+
+        import backtest.loaders.yfinance_loader as yfinance_loader
+
+        monkeypatch.delenv("KRX_OPEN_API_AUTH_KEY", raising=False)
+        monkeypatch.delenv("VIBE_TRADING_KRX_AUTH_KEY", raising=False)
+        monkeypatch.delenv("KOSCOM_OPEN_API_KEY", raising=False)
+        monkeypatch.delenv("KOSCOM_CHECK_API_KEY", raising=False)
+        monkeypatch.delenv("VIBE_TRADING_KOSCOM_API_KEY", raising=False)
+        monkeypatch.setattr(yfinance_loader, "yf", object())
+        with patch.dict(LOADER_REGISTRY, {
+            "krx": KrxLoader,
+            "koscom": KoscomLoader,
+            "yfinance": YfinanceLoader,
+        }, clear=True):
+            with patch.dict(FALLBACK_CHAINS, {
+                "kr_equity": ["krx", "koscom", "yfinance"],
+            }):
+                loader = resolve_loader("kr_equity")
+                assert loader.name == "yfinance"
+
+    def test_kr_equity_uses_koscom_when_krx_missing_and_koscom_key_present(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from backtest.loaders.koscom import DataLoader as KoscomLoader
+        from backtest.loaders.krx import DataLoader as KrxLoader
+        from backtest.loaders.yfinance_loader import DataLoader as YfinanceLoader
+
+        monkeypatch.delenv("KRX_OPEN_API_AUTH_KEY", raising=False)
+        monkeypatch.delenv("VIBE_TRADING_KRX_AUTH_KEY", raising=False)
+        monkeypatch.setenv("KOSCOM_OPEN_API_KEY", "test-key")
+        with patch.dict(LOADER_REGISTRY, {
+            "krx": KrxLoader,
+            "koscom": KoscomLoader,
+            "yfinance": YfinanceLoader,
+        }, clear=True):
+            with patch.dict(FALLBACK_CHAINS, {
+                "kr_equity": ["krx", "koscom", "yfinance"],
+            }):
+                loader = resolve_loader("kr_equity")
+                assert loader.name == "koscom"
 
 
 # ---------------------------------------------------------------------------
