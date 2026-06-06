@@ -3877,6 +3877,276 @@ def _dispatch_connector(args: argparse.Namespace) -> int:
     return EXIT_USAGE_ERROR
 
 
+def cmd_data_source_smoke(
+    *,
+    allow_data_calls: bool,
+    operations: Optional[list[str]],
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    nation_code: str,
+    json_mode: bool,
+    output_path: Optional[Path] = None,
+) -> int:
+    """Plan or run credential-gated Korean official data-source smoke checks."""
+    from backtest.loaders import kr_data_smoke
+
+    kwargs = {
+        "operations": operations,
+        "symbol": symbol,
+        "start_date": start_date,
+        "end_date": end_date,
+        "nation_code": nation_code,
+    }
+    if allow_data_calls:
+        payload = kr_data_smoke.run_smoke(allow_data_calls=True, **kwargs)
+    else:
+        payload = kr_data_smoke.build_smoke_plan(**kwargs)
+
+    if output_path is not None:
+        _write_data_source_smoke_output(payload, output_path)
+
+    if json_mode:
+        print(json.dumps(payload, ensure_ascii=False))
+    else:
+        _print_data_source_smoke(payload, allow_data_calls=allow_data_calls)
+        if output_path is not None:
+            console.print(f"[dim]Wrote smoke evidence: {output_path}[/dim]")
+
+    if payload.get("status") in {"failed", "blocked"}:
+        return EXIT_RUN_FAILED
+    return EXIT_SUCCESS
+
+
+def _write_data_source_smoke_output(payload: dict[str, Any], output_path: Path) -> None:
+    """Write Korean data-source smoke evidence JSON with private file permissions."""
+    output_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    output_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    try:
+        output_path.chmod(0o600)
+    except OSError:
+        pass
+
+
+_DATA_SOURCE_SMOKE_SECRET_MARKERS = (
+    "access_token",
+    "api_key",
+    "apikey",
+    "api_secret",
+    "auth_key",
+    "authorization",
+    "password",
+    "refresh_token",
+    "secret",
+    "token",
+)
+
+
+def cmd_data_source_smoke_audit(
+    *,
+    evidence_path: Path,
+    require_data_calls: bool = False,
+    json_mode: bool = False,
+    output_path: Optional[Path] = None,
+) -> int:
+    """Audit saved Korean official data-source smoke evidence."""
+    result = _audit_data_source_smoke_evidence(
+        evidence_path=evidence_path,
+        require_data_calls=require_data_calls,
+    )
+    if output_path is not None:
+        _write_data_source_smoke_output(result, output_path)
+    if json_mode:
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        console.print_json(data=result)
+        if output_path is not None:
+            console.print(f"[dim]Wrote smoke audit: {output_path}[/dim]")
+    return EXIT_SUCCESS if result.get("status") == "ok" else EXIT_RUN_FAILED
+
+
+def _audit_data_source_smoke_evidence(
+    *,
+    evidence_path: Path,
+    require_data_calls: bool,
+) -> dict[str, Any]:
+    try:
+        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {
+            "status": "failed",
+            "reason": "evidence_not_found",
+            "evidence": str(evidence_path),
+        }
+    except json.JSONDecodeError as exc:
+        return {
+            "status": "failed",
+            "reason": "invalid_json",
+            "evidence": str(evidence_path),
+            "detail": str(exc),
+        }
+
+    if not isinstance(payload, dict):
+        return {
+            "status": "failed",
+            "reason": "invalid_evidence_shape",
+            "evidence": str(evidence_path),
+        }
+
+    secret_markers = _data_source_smoke_secret_markers(payload)
+    if secret_markers:
+        return {
+            "status": "failed",
+            "reason": "secret_marker_detected",
+            "evidence": str(evidence_path),
+            "smoke_status": payload.get("status"),
+            "secret_markers": secret_markers,
+        }
+
+    steps = _data_source_smoke_plan_steps(payload)
+    checks = payload.get("checks")
+    if checks is None:
+        checks = []
+    if not isinstance(steps, list) or not isinstance(checks, list):
+        return {
+            "status": "failed",
+            "reason": "invalid_evidence_shape",
+            "evidence": str(evidence_path),
+            "smoke_status": payload.get("status"),
+        }
+    if not steps and not checks:
+        return {
+            "status": "failed",
+            "reason": "smoke_steps_or_checks_missing",
+            "evidence": str(evidence_path),
+            "smoke_status": payload.get("status"),
+        }
+
+    passed_check_count = _data_source_smoke_passed_check_count(checks)
+    data_calls_proven = passed_check_count > 0
+    result = {
+        "status": "ok",
+        "reason": "validated",
+        "evidence": str(evidence_path),
+        "smoke_status": payload.get("status"),
+        "plan_step_count": len(steps),
+        "check_count": len(checks),
+        "passed_check_count": passed_check_count,
+        "data_calls_proven": data_calls_proven,
+        "secret_markers": [],
+    }
+    if require_data_calls and not data_calls_proven:
+        result["status"] = "failed"
+        result["reason"] = "data_calls_not_proven"
+    return result
+
+
+def _data_source_smoke_plan_steps(payload: dict[str, Any]) -> list[Any]:
+    steps = payload.get("steps")
+    if isinstance(steps, list):
+        return steps
+    plan = payload.get("plan")
+    if isinstance(plan, dict) and isinstance(plan.get("steps"), list):
+        return plan["steps"]
+    return []
+
+
+def _data_source_smoke_passed_check_count(checks: list[Any]) -> int:
+    total = 0
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        if str(check.get("status") or "").lower() != "passed":
+            continue
+        if not str(check.get("operation") or "").strip():
+            continue
+        if not str(check.get("source") or "").strip():
+            continue
+        total += 1
+    return total
+
+
+def _data_source_smoke_secret_markers(value: Any, *, prefix: str = "") -> list[str]:
+    hits: list[str] = []
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            key_text = str(key)
+            path = f"{prefix}.{key_text}" if prefix else key_text
+            normalized = key_text.lower().replace("-", "_")
+            if any(marker in normalized for marker in _DATA_SOURCE_SMOKE_SECRET_MARKERS):
+                hits.append(path)
+            hits.extend(_data_source_smoke_secret_markers(nested, prefix=path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            path = f"{prefix}[{index}]" if prefix else f"[{index}]"
+            hits.extend(_data_source_smoke_secret_markers(item, prefix=path))
+    return sorted(dict.fromkeys(hits))
+
+
+def _print_data_source_smoke(payload: dict[str, Any], *, allow_data_calls: bool) -> None:
+    """Render Korean data-source smoke output for humans without exposing secrets."""
+    title = "Korean data-source smoke" if allow_data_calls else "Korean data-source smoke plan"
+    table = Table(title=title, box=box.SIMPLE_HEAVY)
+    table.add_column("Operation")
+    table.add_column("Source")
+    table.add_column("Status")
+    table.add_column("Details")
+
+    rows = payload.get("checks") if allow_data_calls else payload.get("steps")
+    for row in rows or []:
+        details = []
+        if row.get("symbol"):
+            details.append(str(row["symbol"]))
+        if row.get("start_date") and row.get("end_date"):
+            details.append(f"{row['start_date']}..{row['end_date']}")
+        if row.get("nation_code"):
+            details.append(str(row["nation_code"]).upper())
+        if "rows" in row:
+            details.append(f"rows={row['rows']}")
+        if "holiday_count" in row:
+            details.append(f"holidays={row['holiday_count']}")
+        if row.get("reason"):
+            details.append(str(row["reason"]))
+        table.add_row(
+            str(row.get("operation", "")),
+            str(row.get("source", "")),
+            str(row.get("status", payload.get("status", ""))),
+            ", ".join(details),
+        )
+
+    console.print(table)
+    if not allow_data_calls:
+        console.print("[dim]Add --allow-data-calls to execute read-only credential checks.[/dim]")
+
+
+def _dispatch_data_source(args: argparse.Namespace) -> int:
+    """Route parsed ``data-source`` subcommands."""
+    sub = getattr(args, "data_source_command", None)
+    if sub == "smoke":
+        return cmd_data_source_smoke(
+            allow_data_calls=args.allow_data_calls,
+            operations=args.operations,
+            symbol=args.symbol,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            nation_code=args.nation_code,
+            json_mode=args.data_source_json,
+            output_path=args.output,
+        )
+    if sub == "smoke-audit":
+        return cmd_data_source_smoke_audit(
+            evidence_path=args.evidence,
+            require_data_calls=args.require_data_calls,
+            json_mode=args.data_source_json,
+            output_path=args.output,
+        )
+    console.print("[red]data-source requires a subcommand.[/red] Try: vibe-trading data-source smoke")
+    return EXIT_USAGE_ERROR
+
+
 # ---------------------------------------------------------------------------
 # CLI entrypoint
 # ---------------------------------------------------------------------------
@@ -4047,6 +4317,44 @@ def _build_parser() -> argparse.ArgumentParser:
     ):
         p = connector_subparsers.add_parser(name, help=help_text)
         _add_connector_profile_arg(p)
+
+    data_source_parser = subparsers.add_parser("data-source", help="Inspect market data source readiness")
+    data_source_subparsers = data_source_parser.add_subparsers(dest="data_source_command")
+    data_source_smoke = data_source_subparsers.add_parser(
+        "smoke",
+        help="Plan or run Korean official data-source smoke checks",
+    )
+    data_source_smoke.add_argument(
+        "--allow-data-calls",
+        action="store_true",
+        help="Execute read-only KRX/Koscom calls instead of printing the plan",
+    )
+    data_source_smoke.add_argument(
+        "--operation",
+        dest="operations",
+        action="append",
+        choices=("krx_daily", "koscom_daily", "koscom_holidays"),
+        help="Smoke operation to include; repeat to run multiple operations",
+    )
+    data_source_smoke.add_argument("--symbol", default="005930.KS", help="Korean equity symbol")
+    data_source_smoke.add_argument("--start-date", default="2026-01-02")
+    data_source_smoke.add_argument("--end-date", default="2026-01-02")
+    data_source_smoke.add_argument("--nation-code", default="KR")
+    data_source_smoke.add_argument("--json", dest="data_source_json", action="store_true")
+    data_source_smoke.add_argument("--output", type=Path, help="Write smoke plan/result JSON evidence")
+
+    data_source_smoke_audit = data_source_subparsers.add_parser(
+        "smoke-audit",
+        help="Audit saved Korean official data-source smoke JSON evidence",
+    )
+    data_source_smoke_audit.add_argument("--evidence", type=Path, required=True, help="Smoke JSON evidence path")
+    data_source_smoke_audit.add_argument(
+        "--require-data-calls",
+        action="store_true",
+        help="Fail unless the evidence proves at least one passed KRX/Koscom data-source check",
+    )
+    data_source_smoke_audit.add_argument("--json", dest="data_source_json", action="store_true")
+    data_source_smoke_audit.add_argument("--output", type=Path, help="Write smoke audit JSON evidence")
 
     # Alpha Zoo subcommands (registered via cli_handlers.add_subparser)
     from src.factors.cli_handlers import add_subparser as _add_alpha_subparser
@@ -4553,6 +4861,8 @@ def main(argv: list[str] | None = None) -> int:
         return _coerce_exit_code(_hyp_dispatch(args))
     if args.command == "connector":
         return _coerce_exit_code(_dispatch_connector(args))
+    if args.command == "data-source":
+        return _coerce_exit_code(_dispatch_data_source(args))
     if args.command == "memory":
         if args.memory_command == "list":
             return _coerce_exit_code(cmd_memory_list(args.memory_type))
