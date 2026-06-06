@@ -10,7 +10,11 @@ import pytest
 from src.trading import profiles, service
 from src.tools import build_registry
 from src.tools import trading_connector_tool
-from src.tools.trading_connector_tool import TradingKisWebSocketSmokeTool, TradingSelectConnectionTool
+from src.tools.trading_connector_tool import (
+    TradingKisWebSocketChannelsTool,
+    TradingKisWebSocketSmokeTool,
+    TradingSelectConnectionTool,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -288,6 +292,40 @@ def test_kis_websocket_smoke_tool_schema_exposes_supported_channels() -> None:
     assert "ccnl_krx" in channel_schema["enum"]
     assert "asking_price_krx" in channel_schema["enum"]
     assert "bogus" not in channel_schema["enum"]
+
+
+def test_kis_websocket_channels_tool_returns_official_catalog() -> None:
+    """Agents should inspect the KIS WebSocket channel catalog without broker calls."""
+    payload = json.loads(TradingKisWebSocketChannelsTool().execute())
+
+    assert payload["status"] == "ok"
+    assert payload["connector"] == "kis"
+    assert payload["network"] == "not_attempted"
+    assert payload["count"] == len(payload["channels"])
+    assert payload["channels"]["ccnl_krx"] == {
+        "channel": "ccnl_krx",
+        "tr_id": "H0STCNT0",
+        "tr_key": "symbol",
+        "kind": "trade",
+    }
+    assert payload["channels"]["ccnl_notice"] == {
+        "channel": "ccnl_notice",
+        "live_tr_id": "H0STCNI0",
+        "paper_tr_id": "H0STCNI9",
+        "tr_key": "hts_id",
+        "kind": "order_notice",
+        "encrypted": "Y",
+    }
+
+
+def test_kis_websocket_channels_tool_registers_as_local_readonly_tool() -> None:
+    """The catalog tool should be available locally without exposing broker calls."""
+    registry = build_registry(include_shell_tools=False)
+    tool = registry.get("trading_kis_websocket_channels")
+
+    assert tool is not None
+    assert tool.repeatable is True
+    assert tool.is_readonly is True
 
 
 def test_live_broker_mcp_wrappers_are_hidden_from_agent_registry(monkeypatch: pytest.MonkeyPatch) -> None:

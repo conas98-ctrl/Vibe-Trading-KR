@@ -942,6 +942,19 @@ def trading_kiwoom_websocket_smoke(
 
 
 @mcp.tool
+def trading_kis_websocket_channels() -> str:
+    """List supported KIS WebSocket smoke channels without broker calls.
+
+    Returns the local KIS domestic-stock WebSocket channel catalog, including
+    TR id metadata, subscription-key type, channel kind, and encrypted notice
+    metadata where applicable. This is offline metadata only: it does not
+    request KIS approval keys, open sockets, or write evidence.
+    """
+    registry = _get_registry()
+    return registry.execute("trading_kis_websocket_channels", {})
+
+
+@mcp.tool
 def trading_kis_websocket_smoke(
     channel: str,
     tr_key: str,

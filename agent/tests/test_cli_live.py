@@ -332,6 +332,12 @@ class TestConnectorLiveDispatch:
                 ]
             )
 
+    def test_kis_websocket_channels_routes_to_handler(self) -> None:
+        with patch("cli._legacy.cmd_connector_kis_websocket_channels", return_value=0) as m:
+            assert self._dispatch(["connector", "kis-websocket-channels"]) == 0
+
+        m.assert_called_once_with()
+
     def test_kis_websocket_smoke_rejects_unknown_channel(self, tmp_path: Path) -> None:
         from cli._legacy import _build_parser
 
@@ -661,6 +667,20 @@ class TestKisWebSocketSmokeCli:
                 },
             }
         ]
+
+
+class TestKisWebSocketChannelsCli:
+    def test_command_prints_offline_catalog(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from cli._legacy import EXIT_SUCCESS, cmd_connector_kis_websocket_channels
+
+        assert cmd_connector_kis_websocket_channels() == EXIT_SUCCESS
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["status"] == "ok"
+        assert payload["connector"] == "kis"
+        assert payload["network"] == "not_attempted"
+        assert payload["channels"]["ccnl_krx"]["tr_id"] == "H0STCNT0"
+        assert payload["channels"]["ccnl_notice"]["encrypted"] == "Y"
 
 
 # ---------------------------------------------------------------------------

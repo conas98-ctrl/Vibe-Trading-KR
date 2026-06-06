@@ -516,6 +516,74 @@ vibe-trading --swarm-run investment_committee '{"topic":"BTC outlook"}'</code></
         ]
       },
       {
+        id: "tools/kis-websocket-channel-catalog",
+        title: "KIS WebSocket Channel Catalog",
+        description: "한국투자증권 국내주식 WebSocket smoke 채널과 TR key 요구사항을 broker call 없이 확인합니다.",
+        lead: "채널 카탈로그는 KIS approval key, WebSocket 연결, evidence 파일 없이 로컬 metadata만 보여주는 읽기 전용 operator surface입니다.",
+        sections: [
+          {
+            id: "why",
+            title: "왜 먼저 확인하나요",
+            body: `
+              <p>KIS WebSocket smoke를 실제로 실행하기 전에는 어떤 channel key가 어떤 TR ID와 구독 키를 요구하는지 먼저 고정해야 합니다. 이 catalog command는 그 mapping을 로컬에서만 출력하므로 CI, 리뷰, 문서 확인 환경에서도 안전하게 실행할 수 있습니다.</p>
+              <ul>
+                <li><code>network=not_attempted</code>가 정상 결과입니다.</li>
+                <li>KIS app key, app secret, approval key, HTS ID를 요구하지 않습니다.</li>
+                <li>socket을 열지 않고, evidence 파일도 만들지 않습니다.</li>
+              </ul>
+            `
+          },
+          {
+            id: "cli",
+            title: "CLI",
+            body: `
+              <p>로컬 CLI에서는 다음 명령으로 전체 channel catalog를 JSON으로 확인합니다.</p>
+              <pre><code>vibe-trading connector kis-websocket-channels</code></pre>
+              <p>대표 항목은 국내주식 체결가 <code>ccnl_krx</code> / <code>H0STCNT0</code>, 국내주식 호가 <code>asking_price_krx</code> / <code>H0STASP0</code>, 체결통보 <code>ccnl_notice</code> / <code>H0STCNI0</code> 또는 <code>H0STCNI9</code>입니다.</p>
+            `
+          },
+          {
+            id: "agent-tool",
+            title: "Local agent tool",
+            body: `
+              <p>agent registry에서는 같은 정보를 <code>trading_kis_websocket_channels</code>로 조회합니다. 이 tool은 repeatable/read-only로 등록되어 있으며 인자를 받지 않습니다.</p>
+              <pre><code>{
+  "status": "ok",
+  "connector": "kis",
+  "network": "not_attempted",
+  "channels": {
+    "ccnl_krx": {
+      "tr_id": "H0STCNT0",
+      "tr_key": "symbol",
+      "kind": "trade"
+    }
+  }
+}</code></pre>
+            `
+          },
+          {
+            id: "handoff",
+            title: "Credentialed smoke로 넘기기",
+            body: `
+              <p>catalog에서 channel과 <code>tr_key</code> 종류를 확인한 뒤에만 smoke command에 넘깁니다. 예를 들어 <code>ccnl_krx</code>는 국내주식 종목코드가 필요하므로 삼성전자 예시는 <code>005930</code>입니다.</p>
+              <pre><code>vibe-trading connector kis-websocket-smoke \\
+  --profile kis-paper-sdk \\
+  --channel ccnl_krx \\
+  --tr-key 005930 \\
+  --evidence-path ~/.vibe-trading/evidence/kis-websocket-smoke-ccnl-krx.json</code></pre>
+              <p>실제 broker call은 별도 <code>--allow-broker-calls</code> opt-in 없이는 실행되지 않습니다. 실전 profile은 추가로 <code>--allow-live</code>가 필요합니다.</p>
+            `
+          },
+          {
+            id: "non-claims",
+            title: "아직 claim하지 않는 것",
+            body: `
+              <p>이 page는 channel/TR metadata 확인 절차만 문서화합니다. 실제 KIS WebSocket 접속, 장중 frame 수신, market data 라이선스 확인, 실전 주문 권한, live mandate proof는 credentialed smoke evidence가 생기기 전까지 완료로 claim하지 않습니다.</p>
+            `
+          }
+        ]
+      },
+      {
         id: "tools/kiwoom-websocket-channel-catalog",
         title: "Kiwoom WebSocket Channel Catalog",
         description: "키움증권 REST OpenAPI WebSocket endpoint와 control frame metadata를 broker call 없이 확인합니다.",
@@ -721,6 +789,19 @@ vibe-trading-mcp</code></pre>
 }</code></pre>
               <p>credentialed smoke 전에 <code>domestic_stock_realtime</code> channel, <code>LOGIN</code> login frame, <code>REG</code> subscribe frame, <code>PING</code> ping frame, <code>0B</code> sample type을 고르는 기준으로 사용하세요.</p>
               <p>실제 키움 WebSocket 접속, 장중 frame 수신, market data 라이선스 확인, 실전 주문 권한, live mandate proof는 별도 credentialed evidence가 생기기 전까지 완료로 claim하지 않습니다.</p>
+            `
+          },
+          {
+            id: "kis-websocket-channel-catalog",
+            title: "KIS WebSocket channel catalog",
+            body: `
+              <p>한국시장 확장에서는 MCP tool <code>trading_kis_websocket_channels</code>로 KIS 국내주식 WebSocket 채널/TR 카탈로그를 읽기 전용으로 확인할 수 있습니다.</p>
+              <p>이 tool은 로컬 메타데이터만 반환하며 <code>network=not_attempted</code> 상태로 broker approval key 요청, WebSocket 연결, evidence 파일 쓰기를 하지 않습니다.</p>
+              <pre><code>{
+  "tool": "trading_kis_websocket_channels",
+  "arguments": {}
+}</code></pre>
+              <p>credentialed smoke 전에 <code>ccnl_krx</code> / <code>H0STCNT0</code> 체결 채널이나 <code>ccnl_notice</code> / <code>H0STCNI0</code>, <code>H0STCNI9</code> 체결통보 채널을 고르는 기준으로 사용하세요.</p>
             `
           }
         ]

@@ -196,6 +196,9 @@ vibe-trading alpha bench --zoo gtja191 --universe csi300 --period 2018-2025 --to
 
 # 키움증권 WebSocket channel catalog를 broker call 없이 확인
 vibe-trading connector kiwoom-websocket-channels
+
+# KIS WebSocket smoke 채널/TR 카탈로그를 broker call 없이 확인
+vibe-trading connector kis-websocket-channels
 ```
 
 ```bash
@@ -699,6 +702,17 @@ Vibe-Trading은 모든 MCP-compatible client를 위해 37개 MCP tools를 제공
 
 이 카탈로그로 credentialed smoke 전에 `domestic_stock_realtime` endpoint, `LOGIN` / `REG` / `PING` control frame, `0B` sample type을 먼저 확인할 수 있습니다.
 
+한국시장 확장에서는 KIS WebSocket 채널 카탈로그도 MCP에서 읽기 전용으로 확인할 수 있습니다. `trading_kis_websocket_channels`는 로컬 메타데이터만 반환하며 `network=not_attempted` 상태로 broker approval key 요청, WebSocket 연결, evidence 파일 쓰기를 하지 않습니다.
+
+```json
+{
+  "tool": "trading_kis_websocket_channels",
+  "arguments": {}
+}
+```
+
+이 카탈로그로 credentialed smoke 전에 `ccnl_krx` / `H0STCNT0` 같은 체결 채널과 `ccnl_notice` / `H0STCNI0` / `H0STCNI9` 같은 체결통보 채널을 먼저 고를 수 있습니다.
+
 Kiwoom 국내주식 REST WebSocket smoke를 실행하거나 credentialed evidence를 남길 때는 [Kiwoom WebSocket Smoke Runbook](https://vibetrading.wiki/docs/latest/tools/kiwoom-websocket-smoke-runbook)을 먼저 확인하세요. 기본값은 broker call을 하지 않으며, 실제 Kiwoom REST OpenAPI WebSocket 호출은 `--allow-broker-calls`와 실전 profile의 `--allow-live`로 명시적으로 열립니다.
 
 KIS 국내주식 WebSocket smoke를 실행하거나 credentialed evidence를 남길 때는 [KIS WebSocket Smoke Runbook](https://vibetrading.wiki/docs/latest/tools/kis-websocket-smoke-runbook)을 먼저 확인하세요. 기본값은 broker call을 하지 않으며, 실제 KIS 호출은 `--allow-broker-calls`와 실전 profile의 `--allow-live`로 명시적으로 열립니다.
@@ -743,7 +757,7 @@ vibe-trading-mcp --transport sse  # SSE for web clients
 
 </details>
 
-**노출되는 MCP tools(37):** `list_skills`, `load_skill`, `start_research_goal`, `get_research_goal`, `add_goal_evidence`, `update_research_goal_status`, `backtest`, `factor_analysis`, `analyze_options`, `pattern_recognition`, `read_url`, `read_document`, `web_search`, `write_file`, `read_file`, `trading_kiwoom_websocket_channels`, `trading_connections`, `trading_select_connection`, `trading_check`, `trading_account`, `trading_positions`, `trading_orders`, `trading_quote`, `trading_history`, `list_swarm_presets`, `run_swarm`, `get_market_data`, `get_swarm_status`, `get_run_result`, `list_runs`, `reap_stale_runs`, `retry_run`, `analyze_trade_journal`, `extract_shadow_strategy`, `run_shadow_backtest`, `render_shadow_report`, `scan_shadow_signals`.
+**노출되는 MCP tools(38):** `list_skills`, `load_skill`, `start_research_goal`, `get_research_goal`, `add_goal_evidence`, `update_research_goal_status`, `backtest`, `factor_analysis`, `analyze_options`, `pattern_recognition`, `read_url`, `read_document`, `web_search`, `write_file`, `read_file`, `trading_kiwoom_websocket_channels`, `trading_kis_websocket_channels`, `trading_connections`, `trading_select_connection`, `trading_check`, `trading_account`, `trading_positions`, `trading_orders`, `trading_quote`, `trading_history`, `list_swarm_presets`, `run_swarm`, `get_market_data`, `get_swarm_status`, `get_run_result`, `list_runs`, `reap_stale_runs`, `retry_run`, `analyze_trade_journal`, `extract_shadow_strategy`, `run_shadow_backtest`, `render_shadow_report`, `scan_shadow_signals`.
 
 <details>
 <summary><b>ClawHub에서 설치(한 번의 명령)</b></summary>

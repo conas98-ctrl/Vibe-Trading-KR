@@ -380,6 +380,38 @@ class TradingKiwoomWebSocketChannelsTool(BaseTool):
             return _json_result({"status": "error", "error": str(exc)})
 
 
+class TradingKisWebSocketChannelsTool(BaseTool):
+    """List supported KIS WebSocket channels without touching the broker."""
+
+    name = "trading_kis_websocket_channels"
+    description = (
+        "List the supported KIS domestic-stock WebSocket smoke channel catalog. "
+        "Read-only and offline; it does not request approval keys or open sockets."
+    )
+    parameters = {"type": "object", "properties": {}, "required": []}
+    repeatable = True
+    is_readonly = True
+
+    def execute(self, **_: Any) -> str:
+        """Return the local KIS WebSocket channel catalog."""
+        try:
+            channels = {
+                channel: {"channel": channel, **dict(spec)}
+                for channel, spec in sorted(KIS_WEBSOCKET_CHANNELS.items())
+            }
+            return _json_result(
+                {
+                    "status": "ok",
+                    "connector": "kis",
+                    "network": "not_attempted",
+                    "count": len(channels),
+                    "channels": channels,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _json_result({"status": "error", "error": str(exc)})
+
+
 class TradingAccountTool(BaseTool):
     """Read account summary from a trading connector profile."""
 

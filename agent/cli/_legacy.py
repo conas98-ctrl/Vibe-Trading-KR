@@ -3975,6 +3975,22 @@ def cmd_connector_kiwoom_websocket_channels() -> int:
     return EXIT_SUCCESS
 
 
+def cmd_connector_kis_websocket_channels() -> int:
+    """Print the local KIS WebSocket channel catalog without broker calls."""
+    from src.tools.trading_connector_tool import TradingKisWebSocketChannelsTool
+
+    try:
+        result = json.loads(TradingKisWebSocketChannelsTool().execute())
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]KIS WebSocket channel catalog failed:[/red] {rich_escape(str(exc))}")
+        return EXIT_RUN_FAILED
+
+    console.print_json(data=result)
+    if result.get("status") == "ok":
+        return EXIT_SUCCESS
+    return EXIT_RUN_FAILED
+
+
 def _live_profile_connector(
     profile_id: Optional[str],
     *,
@@ -4173,6 +4189,8 @@ def _dispatch_connector(args: argparse.Namespace) -> int:
             allow_broker_calls=args.allow_broker_calls,
             allow_live=args.allow_live,
         )
+    if sub == "kis-websocket-channels":
+        return cmd_connector_kis_websocket_channels()
     if sub == "kis-websocket-smoke":
         return cmd_connector_kis_websocket_smoke(
             args.profile,
@@ -4713,6 +4731,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "kiwoom-websocket-channels",
         help="Print the local Kiwoom WebSocket channel catalog",
     )
+
+    connector_subparsers.add_parser(
+        "kis-websocket-channels",
+        help="List supported KIS WebSocket smoke channels without broker calls",
+    )
+
     connector_kis_ws_smoke = connector_subparsers.add_parser(
         "kis-websocket-smoke",
         help="Run or plan a gated KIS WebSocket smoke evidence capture",
