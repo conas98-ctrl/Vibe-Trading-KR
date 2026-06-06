@@ -11,6 +11,7 @@ from typing import Optional
 
 import pandas as pd
 
+from backtest.engines._market_hooks import _detect_market
 from backtest.loaders.yfinance_loader import DataLoader as YfinanceLoader
 
 
@@ -21,6 +22,7 @@ from backtest.loaders.yfinance_loader import DataLoader as YfinanceLoader
 MARKET_BENCHMARKS: dict[str, Optional[str]] = {
     "us_equity":  "SPY",
     "hk_equity":  "HK.03100",   # Hang Seng China Enterprises ETF
+    "kr_equity":  "^KS11",      # KOSPI composite index (Yahoo Finance)
     "a_share":    "000300.SH",  # CSI 300 (China A-share core index)
     "crypto":     "BTC-USDT",
     "futures":    "ES.CME",      # E-mini S&P 500 futures
@@ -112,6 +114,9 @@ def _infer_market(codes: list[str], source: str) -> str:
         return "us_equity"
 
     first = codes[0].upper()
+    detected = _detect_market(first)
+    if detected in {"us_equity", "hk_equity", "kr_equity", "crypto", "futures", "forex"}:
+        return detected
 
     if source in ("okx", "ccxt") or "-" in first or "/" in first:
         return "crypto"

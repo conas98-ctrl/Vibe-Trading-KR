@@ -1,4 +1,4 @@
-"""yfinance-backed loader for HK/US equity OHLCV data."""
+"""yfinance-backed loader for US/HK/KR equity OHLCV data."""
 
 from __future__ import annotations
 
@@ -6,7 +6,11 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Union
 
 import pandas as pd
-import yfinance as yf
+
+try:  # yfinance is declared as a project dependency, but keep imports robust.
+    import yfinance as yf
+except ImportError:  # pragma: no cover - exercised in slim local test envs.
+    yf = None
 
 from backtest.loaders.base import validate_date_range
 from backtest.loaders.registry import register
@@ -35,7 +39,8 @@ def _to_yfinance_symbol(code: str) -> str:
     """Convert project symbols into yfinance symbols.
 
     Args:
-        code: Project symbol, for example ``AAPL.US`` or ``700.HK``.
+        code: Project symbol, for example ``AAPL.US``, ``700.HK`` or
+            ``005930.KS``.
 
     Returns:
         yfinance-compatible symbol.
@@ -47,6 +52,17 @@ def _to_yfinance_symbol(code: str) -> str:
         digits = upper[:-3]
         width = max(4, len(digits))
         return f"{digits.zfill(width)}.HK"
+    if upper.endswith((".KS", ".KQ")):
+        digits, suffix = upper.rsplit(".", 1)
+        return f"{digits.zfill(6)}.{suffix}"
+    if upper.startswith("KOSDAQ:"):
+        return f"{upper.removeprefix('KOSDAQ:').zfill(6)}.KQ"
+    if upper.startswith("KOSPI:"):
+        return f"{upper.removeprefix('KOSPI:').zfill(6)}.KS"
+    if upper.startswith("KRX:"):
+        return f"{upper.removeprefix('KRX:').zfill(6)}.KS"
+    if upper.startswith("KR."):
+        return f"{upper.removeprefix('KR.').zfill(6)}.KS"
     return upper
 
 
@@ -80,6 +96,8 @@ def _download_history(
     Returns:
         Raw dataframe from ``yf.download``.
     """
+    if yf is None:
+        raise ImportError("yfinance is not installed; install the project dependencies to fetch yfinance data")
     return yf.download(
         tickers,
         start=start_date,
@@ -191,15 +209,15 @@ def _normalize_frame(frame: pd.DataFrame, requested_interval: str) -> pd.DataFra
 
 @register
 class DataLoader:
-    """Fetch HK/US equity bars from Yahoo Finance via yfinance."""
+    """Fetch US/HK/KR equity bars from Yahoo Finance via yfinance."""
 
     name = "yfinance"
-    markets = {"us_equity", "hk_equity"}
+    markets = {"us_equity", "hk_equity", "kr_equity"}
     requires_auth = False
 
     def is_available(self) -> bool:
-        """Always available (free public data, no auth)."""
-        return True
+        """Available when the optional runtime package can be imported."""
+        return yf is not None
 
     def __init__(self) -> None:
         """Initialize the loader.

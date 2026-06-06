@@ -284,6 +284,7 @@ _MARKET_TO_SOURCE = {
     "a_share": "tushare",
     "us_equity": "yfinance",
     "hk_equity": "yfinance",
+    "kr_equity": "yfinance",
     "crypto": "okx",
     "futures": "tushare",
     "fund": "tushare",

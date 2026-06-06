@@ -27,6 +27,8 @@ _MARKET_PATTERNS = [
     (re.compile(r"^(51|15|56)\d{4}\.(SZ|SH)$", re.I), "a_share"),
     (re.compile(r"^[A-Z]+\.US$", re.I), "us_equity"),
     (re.compile(r"^\d{3,5}\.HK$", re.I), "hk_equity"),
+    (re.compile(r"^\d{6}\.(KS|KQ)$", re.I), "kr_equity"),
+    (re.compile(r"^(KR\.|KRX:|KOSPI:|KOSDAQ:)\d{6}$", re.I), "kr_equity"),
     (re.compile(r"^[A-Z]+-USDT$", re.I), "crypto"),
     (re.compile(r"^[A-Z]+/USDT$", re.I), "crypto"),
     # China futures: product+delivery.exchange (e.g. IF2406.CFFEX, rb2410.SHFE)
@@ -110,17 +112,21 @@ def _is_china_futures(code: str) -> bool:
 
 
 def _detect_submarket(codes: List[str]) -> str:
-    """Detect US vs HK from symbol suffixes.
+    """Detect US vs HK vs KR from symbol suffixes/prefixes.
 
     Args:
         codes: Instrument codes.
 
     Returns:
-        ``"hk"`` if any code ends with ``.HK``, else ``"us"``.
+        ``"hk"`` if any code is Hong Kong, ``"kr"`` if any code is
+        Korean, else ``"us"``.
     """
     for code in codes:
-        if code.upper().endswith(".HK"):
+        upper = code.upper()
+        if upper.endswith(".HK"):
             return "hk"
+        if upper.endswith((".KS", ".KQ")) or upper.startswith(("KR.", "KRX:", "KOSPI:", "KOSDAQ:")):
+            return "kr"
     return "us"
 
 # ── Crypto: OKX tiered maintenance margin table (simplified) ──

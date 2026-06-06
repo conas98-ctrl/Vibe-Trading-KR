@@ -117,12 +117,28 @@ class TestProtocol:
 
 class TestFallbackChains:
     def test_all_expected_markets_present(self) -> None:
-        expected = {"a_share", "us_equity", "hk_equity", "crypto", "futures", "fund", "macro", "forex"}
+        expected = {
+            "a_share",
+            "us_equity",
+            "hk_equity",
+            "kr_equity",
+            "kr_derivative",
+            "kr_bond",
+            "kr_elw",
+            "crypto",
+            "futures",
+            "fund",
+            "macro",
+            "forex",
+        }
         assert expected == set(FALLBACK_CHAINS.keys())
 
     def test_chains_are_non_empty(self) -> None:
         for market, chain in FALLBACK_CHAINS.items():
             assert len(chain) > 0, f"Fallback chain for {market} is empty"
+
+    def test_kr_equity_prefers_public_yfinance_then_akshare_fallback(self) -> None:
+        assert FALLBACK_CHAINS["kr_equity"] == ["yfinance", "akshare"]
 
 
 # ---------------------------------------------------------------------------

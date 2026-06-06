@@ -15,6 +15,7 @@ from backtest.engines._market_hooks import _is_china_futures
 from backtest.runner import (
     _detect_market,
     _detect_source,
+    _detect_submarket,
     _group_codes_by_market,
     _group_codes_by_source,
     _normalize_codes,
@@ -50,6 +51,11 @@ class TestDetectMarket:
             ("0700.HK", "hk_equity"),
             ("9988.HK", "hk_equity"),
             ("00005.HK", "hk_equity"),
+            # Korea equity
+            ("005930.KS", "kr_equity"),
+            ("035720.KQ", "kr_equity"),
+            ("KRX:005930", "kr_equity"),
+            ("KR.005930", "kr_equity"),
             # Crypto
             ("BTC-USDT", "crypto"),
             ("ETH-USDT", "crypto"),
@@ -93,6 +99,7 @@ class TestDetectSource:
             ("000001.SZ", "tushare"),
             ("AAPL.US", "yfinance"),
             ("0700.HK", "yfinance"),
+            ("005930.KS", "yfinance"),
             ("BTC-USDT", "okx"),
             ("IF2406.CFFEX", "tushare"),
             ("EUR/USD", "akshare"),
@@ -131,6 +138,11 @@ class TestGroupCodes:
         assert "tushare" in groups
         assert "yfinance" in groups
 
+    def test_korean_equity_groups_with_yfinance_source(self) -> None:
+        codes = ["005930.KS", "035720.KQ"]
+        assert _group_codes_by_market(codes) == {"kr_equity": codes}
+        assert _group_codes_by_source(codes) == {"yfinance": codes}
+
 
 # ---------------------------------------------------------------------------
 # _normalize_codes
@@ -151,6 +163,19 @@ class TestNormalizeCodes:
         codes = ["000001.SZ", "AAPL.US"]
         assert _normalize_codes(codes, "tushare") == codes
         assert _normalize_codes(codes, "yfinance") == codes
+
+
+# ---------------------------------------------------------------------------
+# _detect_submarket
+# ---------------------------------------------------------------------------
+
+
+class TestDetectSubmarket:
+    def test_korean_suffixes_select_kr_equity_engine_rules(self) -> None:
+        assert _detect_submarket(["005930.KS"]) == "kr"
+        assert _detect_submarket(["035720.KQ"]) == "kr"
+        assert _detect_submarket(["KRX:005930"]) == "kr"
+        assert _detect_submarket(["KR.005930"]) == "kr"
 
 
 # ---------------------------------------------------------------------------
