@@ -238,6 +238,278 @@ def test_kis_parse_websocket_trade_and_system_frames() -> None:
     assert system["key"] == "key-123"
 
 
+def _kis_trade_values(
+    *,
+    symbol: str = "005930",
+    time: str = "123929",
+    price: str = "73100",
+    trade_volume: str = "42",
+    cumulative_volume: str = "1000",
+    execution_side: str = "1",
+) -> list[str]:
+    values = [
+        symbol,
+        time,
+        price,
+        "2",
+        "500",
+        "0.69",
+        "72050",
+        "72000",
+        "73500",
+        "71000",
+        "73100",
+        "73000",
+        trade_volume,
+        cumulative_volume,
+        "73000000",
+        "12",
+        "18",
+        "6",
+        "130.5",
+        "600",
+        "900",
+        execution_side,
+        "60.0",
+        "110.5",
+        "090000",
+        "2",
+        "1100",
+        "123000",
+        "2",
+        "500",
+        "091000",
+        "2",
+        "1000",
+        "20260605",
+        "20",
+        "N",
+        "300",
+        "250",
+        "3000",
+        "2500",
+        "5.5",
+        "900",
+        "111.1",
+        "0",
+        "0",
+        "72000",
+    ]
+    assert len(values) == len(kis.KIS_WEBSOCKET_TRADE_FIELDS)
+    return values
+
+
+def test_kis_websocket_trade_parser_handles_official_multi_record_frame() -> None:
+    first = _kis_trade_values()
+    second = _kis_trade_values(
+        symbol="000660",
+        time="123930",
+        price="121000",
+        trade_volume="7",
+        cumulative_volume="2000",
+        execution_side="5",
+    )
+
+    ticks = kis.parse_websocket_trade_ticks(f"0|H0STCNT0|002|{'^'.join(first + second)}")
+
+    assert [tick["symbol"] for tick in ticks] == ["005930", "000660"]
+    assert ticks[0]["time"] == "123929"
+    assert ticks[0]["last"] == 73100.0
+    assert ticks[0]["trade_volume"] == 42.0
+    assert ticks[0]["signed_trade_volume"] == 42.0
+    assert ticks[0]["cumulative_volume"] == 1000.0
+    assert ticks[0]["cumulative_trade_value"] == 73000000.0
+    assert ticks[0]["ask"] == 73100.0
+    assert ticks[0]["bid"] == 73000.0
+    assert ticks[0]["trade_strength"] == 130.5
+    assert ticks[0]["business_date"] == "20260605"
+    assert ticks[0]["trading_halt"] is False
+    assert ticks[0]["raw_fields"]["MKSC_SHRN_ISCD"] == "005930"
+    assert ticks[0]["raw_values"] == first
+    assert ticks[1]["trade_volume"] == 7.0
+    assert ticks[1]["signed_trade_volume"] == -7.0
+
+
+def test_kis_websocket_trade_parser_rejects_wrong_or_truncated_frames() -> None:
+    with pytest.raises(kis.KoreanConnectorConfigError, match="expected H0STCNT0"):
+        kis.parse_websocket_trade_ticks("0|H0STASP0|001|005930")
+
+    truncated = "^".join(_kis_trade_values()[:-1])
+    with pytest.raises(kis.KoreanConnectorConfigError, match="expected 46 values per H0STCNT0 tick"):
+        kis.parse_websocket_trade_ticks(f"0|H0STCNT0|001|{truncated}")
+
+
+def _kis_orderbook_values(
+    *,
+    symbol: str = "005930",
+    time: str = "123930",
+    ask1: str = "73100",
+    bid1: str = "73000",
+    total_ask: str = "3000",
+    total_bid: str = "2500",
+) -> list[str]:
+    asks = [str(int(ask1) + (level - 1) * 100) for level in range(1, 11)]
+    bids = [str(int(bid1) - (level - 1) * 100) for level in range(1, 11)]
+    ask_quantities = [str(100 * level) for level in range(1, 11)]
+    bid_quantities = [str(90 * level) for level in range(1, 11)]
+    values = [
+        symbol,
+        time,
+        "0",
+        *asks,
+        *bids,
+        *ask_quantities,
+        *bid_quantities,
+        total_ask,
+        total_bid,
+        "120",
+        "90",
+        "73100",
+        "10",
+        "500",
+        "100",
+        "2",
+        "0.14",
+        "12345",
+        "5",
+        "-3",
+        "2",
+        "-1",
+        "00",
+    ]
+    assert len(values) == len(kis.KIS_WEBSOCKET_ORDERBOOK_FIELDS)
+    return values
+
+
+def test_kis_websocket_orderbook_parser_handles_official_multi_record_frame() -> None:
+    first = _kis_orderbook_values()
+    second = _kis_orderbook_values(
+        symbol="000660",
+        time="123931",
+        ask1="121100",
+        bid1="121000",
+        total_ask="7000",
+        total_bid="6500",
+    )
+
+    books = kis.parse_websocket_orderbooks(f"0|H0STASP0|002|{'^'.join(first + second)}")
+
+    assert [book["symbol"] for book in books] == ["005930", "000660"]
+    assert books[0]["time"] == "123930"
+    assert books[0]["asks"][0] == {"level": 1, "price": 73100.0, "quantity": 100.0}
+    assert books[0]["asks"][-1] == {"level": 10, "price": 74000.0, "quantity": 1000.0}
+    assert books[0]["bids"][0] == {"level": 1, "price": 73000.0, "quantity": 90.0}
+    assert books[0]["bids"][-1] == {"level": 10, "price": 72100.0, "quantity": 900.0}
+    assert books[0]["total_ask_quantity"] == 3000.0
+    assert books[0]["total_bid_quantity"] == 2500.0
+    assert books[0]["overtime_total_ask_quantity"] == 120.0
+    assert books[0]["anticipated_price"] == 73100.0
+    assert books[0]["cumulative_volume"] == 12345.0
+    assert books[0]["stock_deal_class_code"] == "00"
+    assert books[0]["raw_fields"]["MKSC_SHRN_ISCD"] == "005930"
+    assert books[0]["raw_values"] == first
+    assert books[1]["asks"][0]["price"] == 121100.0
+    assert books[1]["total_bid_quantity"] == 6500.0
+
+
+def test_kis_websocket_orderbook_parser_rejects_wrong_or_truncated_frames() -> None:
+    with pytest.raises(kis.KoreanConnectorConfigError, match="expected H0STASP0"):
+        kis.parse_websocket_orderbooks("0|H0STCNT0|001|005930")
+
+    truncated = "^".join(_kis_orderbook_values()[:-1])
+    with pytest.raises(kis.KoreanConnectorConfigError, match="expected 59 values per H0STASP0 book"):
+        kis.parse_websocket_orderbooks(f"0|H0STASP0|001|{truncated}")
+
+
+def _kis_notice_values(
+    *,
+    order_id: str = "0000012345",
+    cntg_yn: str = "2",
+    acpt_yn: str = "Y",
+    rfus_yn: str = "N",
+    quantity: str = "3",
+    price: str = "70000",
+) -> list[str]:
+    return [
+        "myhtsid",
+        "12345678-01",
+        order_id,
+        "",
+        "02",
+        "1",
+        "00",
+        "",
+        "005930",
+        quantity,
+        price,
+        "153001",
+        rfus_yn,
+        cntg_yn,
+        acpt_yn,
+        "91234",
+        "5",
+        "TEST ACCOUNT",
+        "0",
+        "KRX",
+        "Y",
+        "",
+        "",
+        "",
+        "20260604",
+        "70000",
+    ]
+
+
+def test_kis_parse_websocket_order_notices_from_official_notice_fields() -> None:
+    assert len(kis.KIS_WEBSOCKET_NOTICE_FIELDS) == 26
+    assert kis.KIS_WEBSOCKET_NOTICE_FIELDS[13] == "CNTG_YN"
+    assert kis.KIS_WEBSOCKET_NOTICE_FIELDS[-1] == "ODER_PRC"
+
+    frame = "1|H0STCNI9|002|" + "^".join(
+        _kis_notice_values(order_id="0000012345")
+        + _kis_notice_values(order_id="0000012346", cntg_yn="1", acpt_yn="Y", rfus_yn="N", quantity="0", price="0")
+    )
+
+    notices = kis.parse_websocket_order_notices(frame)
+
+    assert len(notices) == 2
+    execution = notices[0]
+    assert execution["kind"] == "order_notice"
+    assert execution["tr_id"] == "H0STCNI9"
+    assert execution["environment"] == "paper"
+    assert execution["encrypted"] is True
+    assert execution["customer_id"] == "myhtsid"
+    assert execution["account"] == "12345678-01"
+    assert execution["order_id"] == "0000012345"
+    assert execution["symbol"] == "005930"
+    assert execution["side"] == "buy"
+    assert execution["notice_type"] == "execution"
+    assert execution["execution_notice"] is True
+    assert execution["execution_quantity"] == 3.0
+    assert execution["execution_price"] == 70000.0
+    assert execution["execution_time"] == "153001"
+    assert execution["accepted"] is True
+    assert execution["refused"] is False
+    assert execution["order_quantity"] == 5.0
+    assert execution["order_price"] == 70000.0
+    assert execution["execution_date"] == "20260604"
+    assert execution["raw_fields"]["CNTG_YN"] == "2"
+    assert len(execution["raw_values"]) == 26
+
+    accepted = notices[1]
+    assert accepted["notice_type"] == "order_status"
+    assert accepted["execution_notice"] is False
+    assert accepted["execution_quantity"] == 0.0
+
+
+def test_kis_order_notice_parser_rejects_wrong_or_truncated_frames() -> None:
+    with pytest.raises(kis.KoreanConnectorConfigError, match="H0STCNI"):
+        kis.parse_websocket_order_notices("0|H0STCNT0|001|" + "^".join(_kis_notice_values()))
+
+    with pytest.raises(kis.KoreanConnectorConfigError, match="expected 26 values"):
+        kis.parse_websocket_order_notices("1|H0STCNI0|001|" + "^".join(_kis_notice_values()[:-1]))
+
+
 def test_kis_quote_requests_token_and_official_quote_endpoint() -> None:
     client = _KisClient()
     out = kis.get_quote("005930.KS", config=_cfg(), client=client)

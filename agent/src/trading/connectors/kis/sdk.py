@@ -167,6 +167,8 @@ _KIS_TRADE_COLUMNS = [
     "VI_STND_PRC",
 ]
 
+KIS_WEBSOCKET_TRADE_FIELDS = tuple(_KIS_TRADE_COLUMNS)
+
 _KIS_ORDERBOOK_COLUMNS = [
     "MKSC_SHRN_ISCD",
     "BSOP_HOUR",
@@ -229,6 +231,8 @@ _KIS_ORDERBOOK_COLUMNS = [
     "STCK_DEAL_CLS_CODE",
 ]
 
+KIS_WEBSOCKET_ORDERBOOK_FIELDS = tuple(_KIS_ORDERBOOK_COLUMNS)
+
 _KIS_NOTICE_COLUMNS = [
     "CUST_ID",
     "ACNT_NO",
@@ -257,6 +261,8 @@ _KIS_NOTICE_COLUMNS = [
     "CNTG_ISNM40",
     "ODER_PRC",
 ]
+
+KIS_WEBSOCKET_NOTICE_FIELDS = tuple(_KIS_NOTICE_COLUMNS)
 
 KIS_WEBSOCKET_COLUMNS: dict[str, list[str]] = {
     "H0STASP0": _KIS_ORDERBOOK_COLUMNS,
@@ -505,6 +511,111 @@ def parse_websocket_message(message: str | bytes, *, channel: str | None = None)
         "key": output.get("key"),
         "raw": payload,
     }
+
+
+def parse_websocket_trade_ticks(message: str | bytes) -> list[dict[str, Any]]:
+    """Parse official KIS ``H0STCNT0`` domestic stock trade frames."""
+
+    raw = message.decode("utf-8") if isinstance(message, bytes) else str(message or "")
+    parts = raw.split("|", 3)
+    if len(parts) < 4:
+        raise KoreanConnectorConfigError("KIS WebSocket trade tick parser expected H0STCNT0 data frame.")
+    prefix, tr_id, count_token, payload = parts
+    if prefix != "0" or tr_id != "H0STCNT0":
+        raise KoreanConnectorConfigError(f"KIS WebSocket trade tick parser expected H0STCNT0, got {tr_id or 'missing'}.")
+    try:
+        declared_count = int(count_token)
+    except ValueError as exc:
+        raise KoreanConnectorConfigError(f"KIS WebSocket trade tick parser received invalid H0STCNT0 count {count_token!r}.") from exc
+    if declared_count <= 0:
+        raise KoreanConnectorConfigError("KIS WebSocket trade tick parser expected at least one H0STCNT0 tick.")
+
+    values = payload.split("^") if payload else []
+    field_count = len(KIS_WEBSOCKET_TRADE_FIELDS)
+    expected_values = declared_count * field_count
+    if len(values) != expected_values:
+        raise KoreanConnectorConfigError(
+            f"KIS WebSocket trade tick parser expected {field_count} values per H0STCNT0 tick "
+            f"and {declared_count} ticks, got {len(values)} values."
+        )
+
+    ticks: list[dict[str, Any]] = []
+    for index in range(declared_count):
+        start = index * field_count
+        row_values = values[start : start + field_count]
+        fields = {name: row_values[pos] for pos, name in enumerate(KIS_WEBSOCKET_TRADE_FIELDS)}
+        ticks.append(_websocket_trade_tick(fields, row_values))
+    return ticks
+
+
+def parse_websocket_orderbooks(message: str | bytes) -> list[dict[str, Any]]:
+    """Parse official KIS ``H0STASP0`` domestic stock orderbook frames."""
+
+    raw = message.decode("utf-8") if isinstance(message, bytes) else str(message or "")
+    parts = raw.split("|", 3)
+    if len(parts) < 4:
+        raise KoreanConnectorConfigError("KIS WebSocket orderbook parser expected H0STASP0 data frame.")
+    prefix, tr_id, count_token, payload = parts
+    if prefix != "0" or tr_id != "H0STASP0":
+        raise KoreanConnectorConfigError(f"KIS WebSocket orderbook parser expected H0STASP0, got {tr_id or 'missing'}.")
+    try:
+        declared_count = int(count_token)
+    except ValueError as exc:
+        raise KoreanConnectorConfigError(f"KIS WebSocket orderbook parser received invalid H0STASP0 count {count_token!r}.") from exc
+    if declared_count <= 0:
+        raise KoreanConnectorConfigError("KIS WebSocket orderbook parser expected at least one H0STASP0 book.")
+
+    values = payload.split("^") if payload else []
+    field_count = len(KIS_WEBSOCKET_ORDERBOOK_FIELDS)
+    expected_values = declared_count * field_count
+    if len(values) != expected_values:
+        raise KoreanConnectorConfigError(
+            f"KIS WebSocket orderbook parser expected {field_count} values per H0STASP0 book "
+            f"and {declared_count} books, got {len(values)} values."
+        )
+
+    books: list[dict[str, Any]] = []
+    for index in range(declared_count):
+        start = index * field_count
+        row_values = values[start : start + field_count]
+        fields = {name: row_values[pos] for pos, name in enumerate(KIS_WEBSOCKET_ORDERBOOK_FIELDS)}
+        books.append(_websocket_orderbook(fields, row_values))
+    return books
+
+
+def parse_websocket_order_notices(message: str | bytes) -> list[dict[str, Any]]:
+    """Parse decrypted official KIS ``H0STCNI0``/``H0STCNI9`` order notice frames."""
+
+    raw = message.decode("utf-8") if isinstance(message, bytes) else str(message or "")
+    parts = raw.split("|", 3)
+    if len(parts) != 4:
+        raise KoreanConnectorConfigError("KIS WebSocket order notice parser expected a full data frame.")
+    encrypted_flag, tr_id, declared_count_text, payload = parts
+    if tr_id not in {"H0STCNI0", "H0STCNI9"}:
+        raise KoreanConnectorConfigError(f"KIS WebSocket order notice parser expected H0STCNI0 or H0STCNI9, got {tr_id!r}.")
+    try:
+        declared_count = int(declared_count_text)
+    except ValueError as exc:
+        raise KoreanConnectorConfigError("KIS WebSocket order notice parser received an invalid data count.") from exc
+    if declared_count < 1:
+        raise KoreanConnectorConfigError("KIS WebSocket order notice parser expected at least one notice.")
+
+    values = payload.split("^") if payload else []
+    field_count = len(KIS_WEBSOCKET_NOTICE_FIELDS)
+    expected_values = declared_count * field_count
+    if len(values) != expected_values:
+        raise KoreanConnectorConfigError(
+            f"KIS WebSocket order notice parser expected {expected_values} values "
+            f"({declared_count} x {field_count}), got {len(values)}."
+        )
+
+    notices: list[dict[str, Any]] = []
+    for index in range(declared_count):
+        start = index * field_count
+        row_values = values[start : start + field_count]
+        fields = {name: row_values[pos] for pos, name in enumerate(KIS_WEBSOCKET_NOTICE_FIELDS)}
+        notices.append(_websocket_order_notice(tr_id, fields, row_values, encrypted_flag=encrypted_flag))
+    return notices
 
 
 def get_quote(symbol: str, *, config: KoreanConnectorConfig | None = None, client: Any | None = None, **_: Any) -> dict[str, Any]:
@@ -910,6 +1021,73 @@ def _websocket_event(tr_id: str, fields: Mapping[str, Any]) -> dict[str, Any]:
     return {"kind": kind or "raw"}
 
 
+def _websocket_trade_tick(fields: Mapping[str, Any], raw_values: list[str]) -> dict[str, Any]:
+    return {
+        "kind": "trade",
+        "symbol": fields.get("MKSC_SHRN_ISCD"),
+        "time": fields.get("STCK_CNTG_HOUR"),
+        "last": _to_float(fields.get("STCK_PRPR")),
+        "change_sign": fields.get("PRDY_VRSS_SIGN"),
+        "change": _to_float(fields.get("PRDY_VRSS")),
+        "change_rate": _to_float(fields.get("PRDY_CTRT")),
+        "weighted_average_price": _to_float(fields.get("WGHN_AVRG_STCK_PRC")),
+        "open": _to_float(fields.get("STCK_OPRC")),
+        "high": _to_float(fields.get("STCK_HGPR")),
+        "low": _to_float(fields.get("STCK_LWPR")),
+        "ask": _to_float(fields.get("ASKP1")),
+        "bid": _to_float(fields.get("BIDP1")),
+        "trade_volume": _to_float(fields.get("CNTG_VOL")),
+        "signed_trade_volume": _kis_signed_trade_volume(fields),
+        "cumulative_volume": _to_float(fields.get("ACML_VOL")),
+        "cumulative_trade_value": _to_float(fields.get("ACML_TR_PBMN")),
+        "sell_execution_count": _to_float(fields.get("SELN_CNTG_CSNU")),
+        "buy_execution_count": _to_float(fields.get("SHNU_CNTG_CSNU")),
+        "net_buy_execution_count": _to_float(fields.get("NTBY_CNTG_CSNU")),
+        "trade_strength": _to_float(fields.get("CTTR")),
+        "sell_execution_quantity_total": _to_float(fields.get("SELN_CNTG_SMTN")),
+        "buy_execution_quantity_total": _to_float(fields.get("SHNU_CNTG_SMTN")),
+        "execution_side": fields.get("CCLD_DVSN"),
+        "buy_ratio": _to_float(fields.get("SHNU_RATE")),
+        "previous_volume_rate": _to_float(fields.get("PRDY_VOL_VRSS_ACML_VOL_RATE")),
+        "open_time": fields.get("OPRC_HOUR"),
+        "open_change_sign": fields.get("OPRC_VRSS_PRPR_SIGN"),
+        "open_change": _to_float(fields.get("OPRC_VRSS_PRPR")),
+        "high_time": fields.get("HGPR_HOUR"),
+        "high_change_sign": fields.get("HGPR_VRSS_PRPR_SIGN"),
+        "high_change": _to_float(fields.get("HGPR_VRSS_PRPR")),
+        "low_time": fields.get("LWPR_HOUR"),
+        "low_change_sign": fields.get("LWPR_VRSS_PRPR_SIGN"),
+        "low_change": _to_float(fields.get("LWPR_VRSS_PRPR")),
+        "business_date": fields.get("BSOP_DATE"),
+        "new_market_operation_code": fields.get("NEW_MKOP_CLS_CODE"),
+        "trading_halt": _yn_bool(fields.get("TRHT_YN")),
+        "ask_quantity": _to_float(fields.get("ASKP_RSQN1")),
+        "bid_quantity": _to_float(fields.get("BIDP_RSQN1")),
+        "total_ask_quantity": _to_float(fields.get("TOTAL_ASKP_RSQN")),
+        "total_bid_quantity": _to_float(fields.get("TOTAL_BIDP_RSQN")),
+        "volume_turnover": _to_float(fields.get("VOL_TNRT")),
+        "previous_same_time_cumulative_volume": _to_float(fields.get("PRDY_SMNS_HOUR_ACML_VOL")),
+        "previous_same_time_cumulative_volume_rate": _to_float(fields.get("PRDY_SMNS_HOUR_ACML_VOL_RATE")),
+        "hour_class_code": fields.get("HOUR_CLS_CODE"),
+        "market_treatment_class_code": fields.get("MRKT_TRTM_CLS_CODE"),
+        "vi_standard_price": _to_float(fields.get("VI_STND_PRC")),
+        "raw_fields": dict(fields),
+        "raw_values": list(raw_values),
+    }
+
+
+def _kis_signed_trade_volume(fields: Mapping[str, Any]) -> float | None:
+    volume = _to_float(fields.get("CNTG_VOL"))
+    if volume is None:
+        return None
+    execution_side = str(fields.get("CCLD_DVSN") or "").strip()
+    if execution_side == "5":
+        return -abs(volume)
+    if execution_side == "1":
+        return abs(volume)
+    return volume
+
+
 def _websocket_book_side(fields: Mapping[str, Any], price_prefix: str, quantity_prefix: str) -> list[dict[str, float | int]]:
     levels: list[dict[str, float | int]] = []
     for index in range(1, 11):
@@ -918,6 +1096,79 @@ def _websocket_book_side(fields: Mapping[str, Any], price_prefix: str, quantity_
         if price is not None or quantity is not None:
             levels.append({"level": index, "price": price, "quantity": quantity})
     return levels
+
+
+def _websocket_orderbook(fields: Mapping[str, Any], raw_values: list[str]) -> dict[str, Any]:
+    return {
+        "kind": "orderbook",
+        "symbol": fields.get("MKSC_SHRN_ISCD"),
+        "time": fields.get("BSOP_HOUR"),
+        "hour_class_code": fields.get("HOUR_CLS_CODE"),
+        "asks": _websocket_book_side(fields, "ASKP", "ASKP_RSQN"),
+        "bids": _websocket_book_side(fields, "BIDP", "BIDP_RSQN"),
+        "total_ask_quantity": _to_float(fields.get("TOTAL_ASKP_RSQN")),
+        "total_bid_quantity": _to_float(fields.get("TOTAL_BIDP_RSQN")),
+        "overtime_total_ask_quantity": _to_float(fields.get("OVTM_TOTAL_ASKP_RSQN")),
+        "overtime_total_bid_quantity": _to_float(fields.get("OVTM_TOTAL_BIDP_RSQN")),
+        "anticipated_price": _to_float(fields.get("ANTC_CNPR")),
+        "anticipated_quantity": _to_float(fields.get("ANTC_CNQN")),
+        "anticipated_volume": _to_float(fields.get("ANTC_VOL")),
+        "anticipated_change": _to_float(fields.get("ANTC_CNTG_VRSS")),
+        "anticipated_change_sign": fields.get("ANTC_CNTG_VRSS_SIGN"),
+        "anticipated_change_rate": _to_float(fields.get("ANTC_CNTG_PRDY_CTRT")),
+        "cumulative_volume": _to_float(fields.get("ACML_VOL")),
+        "total_ask_quantity_change": _to_float(fields.get("TOTAL_ASKP_RSQN_ICDC")),
+        "total_bid_quantity_change": _to_float(fields.get("TOTAL_BIDP_RSQN_ICDC")),
+        "overtime_total_ask_change": _to_float(fields.get("OVTM_TOTAL_ASKP_ICDC")),
+        "overtime_total_bid_change": _to_float(fields.get("OVTM_TOTAL_BIDP_ICDC")),
+        "stock_deal_class_code": fields.get("STCK_DEAL_CLS_CODE"),
+        "raw_fields": dict(fields),
+        "raw_values": list(raw_values),
+    }
+
+
+def _websocket_order_notice(
+    tr_id: str,
+    fields: Mapping[str, Any],
+    raw_values: list[str],
+    *,
+    encrypted_flag: str,
+) -> dict[str, Any]:
+    cntg_yn = str(fields.get("CNTG_YN") or "").strip()
+    return {
+        "kind": "order_notice",
+        "tr_id": tr_id,
+        "environment": "paper" if tr_id == "H0STCNI9" else "live",
+        "encrypted": str(encrypted_flag).strip() == "1",
+        "customer_id": fields.get("CUST_ID"),
+        "account": fields.get("ACNT_NO"),
+        "order_id": fields.get("ODER_NO"),
+        "original_order_id": fields.get("OODER_NO"),
+        "side": _kis_order_side(fields.get("SELN_BYOV_CLS")),
+        "receipt_class": fields.get("RCTF_CLS"),
+        "order_kind": fields.get("ODER_KIND"),
+        "order_condition": fields.get("ODER_COND"),
+        "symbol": fields.get("STCK_SHRN_ISCD"),
+        "execution_quantity": _to_float(fields.get("CNTG_QTY")),
+        "execution_price": _to_float(fields.get("CNTG_UNPR")),
+        "execution_time": fields.get("STCK_CNTG_HOUR"),
+        "refused": _yn_bool(fields.get("RFUS_YN")),
+        "notice_type": "execution" if cntg_yn == "2" else "order_status" if cntg_yn == "1" else "raw",
+        "execution_notice": cntg_yn == "2",
+        "accepted": _yn_bool(fields.get("ACPT_YN")),
+        "branch_no": fields.get("BRNC_NO"),
+        "order_quantity": _to_float(fields.get("ODER_QTY")),
+        "account_name": fields.get("ACNT_NAME"),
+        "order_condition_price": _to_float(fields.get("ORD_COND_PRC")),
+        "exchange": fields.get("ORD_EXG_GB"),
+        "popup": _yn_bool(fields.get("POPUP_YN")),
+        "credit_class": fields.get("CRDT_CLS"),
+        "credit_loan_date": fields.get("CRDT_LOAN_DATE"),
+        "execution_date": fields.get("CNTG_ISNM40"),
+        "order_price": _to_float(fields.get("ODER_PRC")),
+        "raw_fields": dict(fields),
+        "raw_values": list(raw_values),
+    }
 
 
 def _account_ref(config: KoreanConnectorConfig) -> str:
@@ -1018,6 +1269,15 @@ def _to_float(value: Any) -> float | None:
         return float(str(value).replace(",", ""))
     except (TypeError, ValueError):
         return None
+
+
+def _yn_bool(value: Any) -> bool | None:
+    token = str(value or "").strip().upper()
+    if token == "Y":
+        return True
+    if token == "N":
+        return False
+    return None
 
 
 def _numeric_string(value: float | int | str) -> str:
