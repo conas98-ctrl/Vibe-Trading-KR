@@ -399,7 +399,21 @@ https://github.com/user-attachments/assets/3754a414-c3ee-464f-b1e8-78e1a74fbd30
 
 ## 🚀 빠른 시작
 
-### 한 줄 설치 (PyPI)
+### 설치
+
+> **어떤 설치가 필요한가요?** [`vibe-trading-ai` PyPI 패키지](https://pypi.org/project/vibe-trading-ai/)는 **원본(upstream) 코어**만
+> 배포합니다. 이 포크의 한국 증권사 커넥터(KIS · LS · DB · 키움)와 KRX 문서는 **PyPI에 게시되어 있지 않습니다** — 사용하려면
+> 이 저장소를 소스에서 설치하세요.
+
+**권장 — 한국 포크(소스 설치):**
+
+```bash
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
+pip install -e .
+```
+
+**원본 코어만 (PyPI, KR 커넥터 없음):**
 
 ```bash
 pip install vibe-trading-ai
@@ -450,8 +464,8 @@ vibe-trading-mcp               # start MCP server (stdio)
 ### 경로 A: Docker (설정 불필요)
 
 ```bash
-git clone https://github.com/HKUDS/Vibe-Trading.git
-cd Vibe-Trading
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
 cp agent/.env.example agent/.env
 # Edit agent/.env — uncomment your LLM provider and set API key
 docker compose up --build
@@ -464,8 +478,8 @@ Docker는 기본적으로 backend를 `127.0.0.1:8899`에 게시하고 앱을 non
 ### 경로 B: Local install
 
 ```bash
-git clone https://github.com/HKUDS/Vibe-Trading.git
-cd Vibe-Trading
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
 python -m venv .venv
 
 # Activate

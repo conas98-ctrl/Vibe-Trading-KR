@@ -384,7 +384,21 @@ https://github.com/user-attachments/assets/3754a414-c3ee-464f-b1e8-78e1a74fbd30
 
 ## 🚀 Quick Start
 
-### One-line install (PyPI)
+### Install
+
+> **Which install do you want?** The [`vibe-trading-ai` PyPI package](https://pypi.org/project/vibe-trading-ai/) ships the
+> **upstream core** only. The Korean broker connectors (KIS · LS · DB · Kiwoom) and the KRX docs in this fork are **not
+> published to PyPI** — to get them, install this repo from source.
+
+**Recommended — Korean fork (from source):**
+
+```bash
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
+pip install -e .
+```
+
+**Upstream core only (PyPI, no KR connectors):**
 
 ```bash
 pip install vibe-trading-ai
@@ -435,8 +449,8 @@ vibe-trading-mcp               # start MCP server (stdio)
 ### Path A: Docker (zero setup)
 
 ```bash
-git clone https://github.com/HKUDS/Vibe-Trading.git
-cd Vibe-Trading
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
 cp agent/.env.example agent/.env
 # Edit agent/.env — uncomment your LLM provider and set API key
 docker compose up --build
@@ -449,8 +463,8 @@ Docker publishes the backend on `127.0.0.1:8899` by default and runs the app as 
 ### Path B: Local install
 
 ```bash
-git clone https://github.com/HKUDS/Vibe-Trading.git
-cd Vibe-Trading
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
 python -m venv .venv
 
 # Activate
