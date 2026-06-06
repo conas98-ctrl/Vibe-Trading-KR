@@ -76,6 +76,38 @@ KIWOOM_REST_ENDPOINTS: dict[str, dict[str, str]] = {
     },
 }
 
+KIWOOM_WEBSOCKET_ENDPOINTS: dict[str, dict[str, str]] = {
+    "domestic_stock_realtime": {
+        "url": "wss://api.kiwoom.com:10000/api/dostk/websocket",
+        "login_trnm": "LOGIN",
+        "subscribe_trnm": "REG",
+        "ping_trnm": "PING",
+        "sample_type": "0B",
+    },
+}
+
+KIWOOM_WEBSOCKET_REALTIME_TYPES: dict[str, str] = {
+    "00": "주문체결",
+    "04": "잔고",
+    "0A": "주식기세",
+    "0B": "주식체결",
+    "0C": "주식우선호가",
+    "0D": "주식호가잔량",
+    "0E": "주식시간외호가",
+    "0F": "주식당일거래원",
+    "0G": "ETF NAV",
+    "0H": "주식예상체결",
+    "0I": "국제금환산가격",
+    "0J": "업종지수",
+    "0U": "업종등락",
+    "0g": "주식종목정보",
+    "0m": "ELW 이론가",
+    "0s": "장시작시간",
+    "0u": "ELW 지표",
+    "0w": "종목프로그램매매",
+    "1h": "VI발동/해제",
+}
+
 
 def config_path() -> Path:
     return get_runtime_root() / CONFIG_FILENAME
@@ -104,8 +136,58 @@ def check_status(config: KoreanConnectorConfig | None = None) -> dict[str, Any]:
     report = _check_status(config or load_config(), label=LABEL)
     report["auth_probe"] = "not_run"
     report["auth_probe_reason"] = "Kiwoom token issuance is deferred until an explicit read/order call."
-    report["official_catalog"] = "ka10001,ka10081,kt00018,ka10075,kt10000,kt10001,kt10002,kt10003"
+    realtime_types = ",".join(KIWOOM_WEBSOCKET_REALTIME_TYPES)
+    report["official_catalog"] = (
+        "ka10001,ka10081,kt00018,ka10075,kt10000,kt10001,kt10002,kt10003,"
+        f"websocket:{realtime_types}"
+    )
     return report
+
+
+def build_websocket_login_frame(access_token: str) -> dict[str, str]:
+    token = str(access_token or "").strip()
+    if not token:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket login frame requires access token.")
+    return {"trnm": KIWOOM_WEBSOCKET_ENDPOINTS["domestic_stock_realtime"]["login_trnm"], "token": token}
+
+
+def build_websocket_subscribe_frame(
+    symbols: list[str] | tuple[str, ...],
+    *,
+    group_no: int | str = 1,
+    channel: str = "domestic_stock_realtime",
+    refresh: bool = True,
+    types: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    endpoint = KIWOOM_WEBSOCKET_ENDPOINTS.get(channel)
+    if endpoint is None:
+        raise KoreanConnectorConfigError(f"Unknown Kiwoom WebSocket channel: {channel}.")
+    items = [_normalize_kr_symbol(symbol) for symbol in symbols if str(symbol or "").strip()]
+    if not items:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket subscribe frame requires at least one symbol.")
+    type_codes = [str(code).strip() for code in (types or (endpoint["sample_type"],)) if str(code).strip()]
+    if not type_codes:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket subscribe frame requires at least one type code.")
+    unknown = [code for code in type_codes if code not in KIWOOM_WEBSOCKET_REALTIME_TYPES]
+    if unknown:
+        raise KoreanConnectorConfigError(f"Unknown Kiwoom WebSocket realtime type: {', '.join(unknown)}.")
+    return {
+        "trnm": endpoint["subscribe_trnm"],
+        "grp_no": str(group_no),
+        "refresh": "1" if refresh else "0",
+        "data": [{"item": items, "type": type_codes}],
+    }
+
+
+def websocket_control_reply(message: Mapping[str, Any]) -> dict[str, Any] | None:
+    endpoint = KIWOOM_WEBSOCKET_ENDPOINTS["domestic_stock_realtime"]
+    trnm = str(message.get("trnm") or "").strip().upper()
+    if trnm == endpoint["ping_trnm"]:
+        return dict(message)
+    if trnm == endpoint["login_trnm"] and str(message.get("return_code", "0")).strip() not in {"0", ""}:
+        reason = str(message.get("return_msg") or "unknown error").strip()
+        raise KoreanConnectorConfigError(f"Kiwoom WebSocket login failed: {reason}")
+    return None
 
 
 def get_account_snapshot(
