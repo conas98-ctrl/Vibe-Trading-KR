@@ -1,4 +1,4 @@
-"""Daishin CYBOS/CREON Plus Windows bridge connector bootstrap."""
+"""NH QV Open API Windows bridge connector bootstrap."""
 
 from __future__ import annotations
 
@@ -6,12 +6,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from src.config.paths import get_runtime_root
-from src.trading.connectors.kr_common import (
-    KoreanConnectorConfig,
-    build_config as _build_config,
-    load_config as _load_config,
-    save_config as _save_config,
-)
 from src.trading.connectors.kr_bridge import (
     check_bridge_status,
     get_account_snapshot as _bridge_account_snapshot,
@@ -20,11 +14,17 @@ from src.trading.connectors.kr_bridge import (
     get_positions as _bridge_positions,
     get_quote as _bridge_quote,
 )
+from src.trading.connectors.kr_common import (
+    KoreanConnectorConfig,
+    build_config as _build_config,
+    load_config as _load_config,
+    save_config as _save_config,
+)
 
-CONFIG_FILENAME = "daishin-cybos-bridge.json"
-DEFAULT_BRIDGE_URL = "http://127.0.0.1:8766"
-LABEL = "Daishin CYBOS/CREON bridge"
-CONNECTOR = "daishin-cybos"
+CONFIG_FILENAME = "nh-qv-bridge.json"
+DEFAULT_BRIDGE_URL = "http://127.0.0.1:8769"
+LABEL = "NH QV Open API bridge"
+CONNECTOR = "nh-qv"
 
 
 def config_path() -> Path:

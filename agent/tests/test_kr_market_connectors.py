@@ -41,6 +41,9 @@ def test_korean_broker_profiles_registered() -> None:
         "kiwoom-live-trade",
         "kiwoom-openapi-live-bridge-readonly",
         "daishin-cybos-live-bridge-readonly",
+        "eugene-champion-live-bridge-readonly",
+        "yuanta-tradar-live-bridge-readonly",
+        "nh-qv-live-bridge-readonly",
     } <= ids
 
 
@@ -53,6 +56,9 @@ def test_korean_broker_profiles_registered() -> None:
         ("kiwoom-live-trade", "kiwoom", "broker_sdk", False),
         ("kiwoom-openapi-live-bridge-readonly", "kiwoom-openapi", "local_bridge", True),
         ("daishin-cybos-live-bridge-readonly", "daishin-cybos", "local_bridge", True),
+        ("eugene-champion-live-bridge-readonly", "eugene-champion", "local_bridge", True),
+        ("yuanta-tradar-live-bridge-readonly", "yuanta-tradar", "local_bridge", True),
+        ("nh-qv-live-bridge-readonly", "nh-qv", "local_bridge", True),
     ],
 )
 def test_korean_profiles_carry_connector_transport_and_trade_gate(profile_id, connector, transport, readonly) -> None:
@@ -72,6 +78,9 @@ def test_korean_profiles_carry_connector_transport_and_trade_gate(profile_id, co
         ("kiwoom", "kiwoom-paper-sdk"),
         ("kiwoom-openapi", "kiwoom-openapi-live-bridge-readonly"),
         ("daishin-cybos", "daishin-cybos-live-bridge-readonly"),
+        ("eugene-champion", "eugene-champion-live-bridge-readonly"),
+        ("yuanta-tradar", "yuanta-tradar-live-bridge-readonly"),
+        ("nh-qv", "nh-qv-live-bridge-readonly"),
     ],
 )
 def test_korean_connectors_degrade_cleanly_when_unconfigured(connector, profile_id, monkeypatch, tmp_path) -> None:

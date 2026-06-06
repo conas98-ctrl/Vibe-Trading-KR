@@ -25,6 +25,9 @@ _SDK_CONNECTOR_MODULES = {
     "kiwoom": "src.trading.connectors.kiwoom.sdk",
     "kiwoom-openapi": "src.trading.connectors.kiwoom_openapi.sdk",
     "daishin-cybos": "src.trading.connectors.daishin_cybos.sdk",
+    "eugene-champion": "src.trading.connectors.eugene_champion.sdk",
+    "yuanta-tradar": "src.trading.connectors.yuanta_tradar.sdk",
+    "nh-qv": "src.trading.connectors.nh_qv.sdk",
 }
 
 
@@ -209,6 +212,8 @@ _CONNECTOR_INSTRUMENT = {
     "kiwoom": ("equity", "kr_equity"),
     "kiwoom-openapi": ("equity", "kr_equity"),
     "daishin-cybos": ("equity", "kr_equity"),
+    "eugene-champion": ("equity", "kr_equity"),
+    "yuanta-tradar": ("equity", "kr_equity"),
     "tiger": ("equity", None),
     "longbridge": ("equity", None),
     "futu": ("equity", None),

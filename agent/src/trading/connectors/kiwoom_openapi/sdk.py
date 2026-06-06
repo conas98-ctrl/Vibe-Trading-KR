@@ -9,10 +9,16 @@ from src.config.paths import get_runtime_root
 from src.trading.connectors.kr_common import (
     KoreanConnectorConfig,
     build_config as _build_config,
-    check_status as _check_status,
     load_config as _load_config,
     save_config as _save_config,
-    unsupported_or_unconfigured,
+)
+from src.trading.connectors.kr_bridge import (
+    check_bridge_status,
+    get_account_snapshot as _bridge_account_snapshot,
+    get_historical_bars as _bridge_historical_bars,
+    get_open_orders as _bridge_open_orders,
+    get_positions as _bridge_positions,
+    get_quote as _bridge_quote,
 )
 
 CONFIG_FILENAME = "kiwoom-openapi-bridge.json"
@@ -43,24 +49,29 @@ def build_config(profile_config: Mapping[str, Any] | None = None, overrides: Map
     )
 
 
-def check_status(config: KoreanConnectorConfig | None = None) -> dict[str, Any]:
-    return _check_status(config or load_config(), label=LABEL, bridge=True)
+def check_status(config: KoreanConnectorConfig | None = None, *, client: Any | None = None) -> dict[str, Any]:
+    return check_bridge_status(config or load_config(), label=LABEL, client=client)
 
 
-def get_account_snapshot(config: KoreanConnectorConfig | None = None) -> dict[str, Any]:
-    return unsupported_or_unconfigured(config or load_config(), label=LABEL, operation="account snapshot", bridge=True)
+def get_account_snapshot(config: KoreanConnectorConfig | None = None, *, client: Any | None = None) -> dict[str, Any]:
+    return _bridge_account_snapshot(config or load_config(), label=LABEL, client=client)
 
 
-def get_positions(config: KoreanConnectorConfig | None = None) -> dict[str, Any]:
-    return unsupported_or_unconfigured(config or load_config(), label=LABEL, operation="positions", bridge=True)
+def get_positions(config: KoreanConnectorConfig | None = None, *, client: Any | None = None) -> dict[str, Any]:
+    return _bridge_positions(config or load_config(), label=LABEL, client=client)
 
 
-def get_open_orders(config: KoreanConnectorConfig | None = None, *, include_executions: bool = False) -> dict[str, Any]:
-    return unsupported_or_unconfigured(config or load_config(), label=LABEL, operation="open orders", bridge=True)
+def get_open_orders(
+    config: KoreanConnectorConfig | None = None,
+    *,
+    include_executions: bool = False,
+    client: Any | None = None,
+) -> dict[str, Any]:
+    return _bridge_open_orders(config or load_config(), label=LABEL, include_executions=include_executions, client=client)
 
 
-def get_quote(symbol: str, *, config: KoreanConnectorConfig | None = None, **_: Any) -> dict[str, Any]:
-    return unsupported_or_unconfigured(config or load_config(), label=LABEL, operation=f"quote {symbol}", bridge=True)
+def get_quote(symbol: str, *, config: KoreanConnectorConfig | None = None, client: Any | None = None, **_: Any) -> dict[str, Any]:
+    return _bridge_quote(symbol, config=config or load_config(), label=LABEL, client=client)
 
 
 def get_historical_bars(
@@ -69,6 +80,14 @@ def get_historical_bars(
     config: KoreanConnectorConfig | None = None,
     period: str = "1d",
     limit: int = 90,
+    client: Any | None = None,
     **_: Any,
 ) -> dict[str, Any]:
-    return unsupported_or_unconfigured(config or load_config(), label=LABEL, operation=f"history {symbol}", bridge=True)
+    return _bridge_historical_bars(
+        symbol,
+        config=config or load_config(),
+        label=LABEL,
+        period=period,
+        limit=limit,
+        client=client,
+    )

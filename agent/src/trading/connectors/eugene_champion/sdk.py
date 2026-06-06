@@ -1,4 +1,4 @@
-"""Daishin CYBOS/CREON Plus Windows bridge connector bootstrap."""
+"""Eugene Champion Open API Windows bridge connector bootstrap."""
 
 from __future__ import annotations
 
@@ -21,10 +21,10 @@ from src.trading.connectors.kr_bridge import (
     get_quote as _bridge_quote,
 )
 
-CONFIG_FILENAME = "daishin-cybos-bridge.json"
-DEFAULT_BRIDGE_URL = "http://127.0.0.1:8766"
-LABEL = "Daishin CYBOS/CREON bridge"
-CONNECTOR = "daishin-cybos"
+CONFIG_FILENAME = "eugene-champion-bridge.json"
+DEFAULT_BRIDGE_URL = "http://127.0.0.1:8767"
+LABEL = "Eugene Champion Open API bridge"
+CONNECTOR = "eugene-champion"
 
 
 def config_path() -> Path:
