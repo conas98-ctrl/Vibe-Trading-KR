@@ -172,6 +172,46 @@ class TestConnectorLiveDispatch:
             output_path=None,
         )
 
+    def test_korean_configure_routes_credential_fields(self) -> None:
+        with patch("cli._legacy.cmd_connector_configure", return_value=0) as m:
+            self._dispatch(
+                [
+                    "connector",
+                    "configure",
+                    "kis-paper-sdk",
+                    "--app-key-env",
+                    "KIS_APP_KEY",
+                    "--app-secret-env",
+                    "KIS_APP_SECRET",
+                    "--account",
+                    "12345678",
+                    "--account-product-code",
+                    "01",
+                    "--yes",
+                ]
+            )
+        m.assert_called_once_with(
+            "kis-paper-sdk",
+            host="127.0.0.1",
+            port=None,
+            client_id=77,
+            account="12345678",
+            account_product_code="01",
+            app_key=None,
+            app_key_env="KIS_APP_KEY",
+            app_secret=None,
+            app_secret_env="KIS_APP_SECRET",
+            access_token=None,
+            access_token_env=None,
+            base_url=None,
+            paper_url=None,
+            live_url=None,
+            bridge_url=None,
+            bridge_token=None,
+            bridge_token_env=None,
+            yes=True,
+        )
+
     def test_smoke_routes_output_path(self, tmp_path: Path) -> None:
         output_path = tmp_path / "evidence" / "kr-broker-smoke.json"
         with patch("cli._legacy.cmd_connector_smoke", return_value=0) as m:
@@ -630,6 +670,96 @@ def test_connector_smoke_audit_writes_private_audit_report(tmp_path: Path) -> No
     assert payload["smoke_status"] == "not_run"
     assert payload["broker_calls_proven"] is False
     assert output_path.stat().st_mode & 0o777 == 0o600
+
+
+class TestKoreanConnectorConfigure:
+    def test_configures_korean_sdk_profile_from_env_without_printing_secret(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from cli._legacy import cmd_connector_configure
+        from src.trading import service
+        from src.trading.connectors.kis import sdk as kis
+
+        monkeypatch.setattr(kis, "get_runtime_root", lambda: tmp_path)
+        monkeypatch.setenv("KIS_TEST_APP_KEY", "test-app-key")
+        monkeypatch.setenv("KIS_TEST_APP_SECRET", "test-app-secret")
+
+        assert (
+            cmd_connector_configure(
+                "kis-paper-sdk",
+                account="12345678",
+                account_product_code="01",
+                app_key_env="KIS_TEST_APP_KEY",
+                app_secret_env="KIS_TEST_APP_SECRET",
+                yes=True,
+            )
+            == 0
+        )
+
+        path = tmp_path / "kis.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["profile"] == "paper"
+        assert payload["app_key"] == "test-app-key"
+        assert payload["app_secret"] == "test-app-secret"
+        assert payload["account"] == "12345678"
+        assert payload["account_product_code"] == "01"
+        assert path.stat().st_mode & 0o777 == 0o600
+
+        out = capsys.readouterr().out
+        assert "test-app-secret" not in out
+        assert "test-app-key" not in out
+
+        report = service.check_connection("kis-paper-sdk")
+        assert report["status"] == "ok"
+        assert report["profile_id"] == "kis-paper-sdk"
+        assert report["config"]["app_secret"] == "***redacted***"
+        assert report["config"]["app_key"] == "test***"
+
+    def test_configures_korean_bridge_profile_from_env(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from cli._legacy import cmd_connector_configure
+        from src.trading.connectors.kiwoom_openapi import sdk as kiwoom_openapi
+
+        monkeypatch.setattr(kiwoom_openapi, "get_runtime_root", lambda: tmp_path)
+        monkeypatch.setenv("KIWOOM_BRIDGE_TOKEN", "bridge-secret-token")
+
+        assert (
+            cmd_connector_configure(
+                "kiwoom-openapi-live-bridge-readonly",
+                bridge_url="http://127.0.0.1:8765",
+                bridge_token_env="KIWOOM_BRIDGE_TOKEN",
+                yes=True,
+            )
+            == 0
+        )
+
+        path = tmp_path / "kiwoom-openapi-bridge.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["profile"] == "live-readonly"
+        assert payload["bridge_url"] == "http://127.0.0.1:8765"
+        assert payload["bridge_token"] == "bridge-secret-token"
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert "bridge-secret-token" not in capsys.readouterr().out
+
+    def test_korean_sdk_config_requires_app_key_and_secret(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from cli._legacy import cmd_connector_configure
+        from src.trading.connectors.kis import sdk as kis
+
+        monkeypatch.setattr(kis, "get_runtime_root", lambda: tmp_path)
+
+        assert cmd_connector_configure("kis-paper-sdk", app_key="only-key", yes=True) == 2
+        assert not (tmp_path / "kis.json").exists()
 
 
 # ---------------------------------------------------------------------------
