@@ -378,6 +378,144 @@ vibe-trading --swarm-run investment_committee '{"topic":"BTC outlook"}'</code></
         ]
       },
       {
+        id: "tools/kis-websocket-smoke-runbook",
+        title: "KIS WebSocket Smoke Runbook",
+        description: "한국투자증권 국내주식 WebSocket smoke를 안전하게 실행하고 evidence를 남기는 절차.",
+        lead: "KIS WebSocket smoke는 기본적으로 broker call을 하지 않으며, 실제 한국투자증권 네트워크 호출은 operator가 명시적으로 opt-in 했을 때만 실행됩니다.",
+        sections: [
+          {
+            id: "official-surfaces",
+            title: "공식 확인 표면",
+            body: `
+              <p>이 runbook은 한국투자증권 KIS Open API WebSocket smoke 흐름을 Vibe-Trading에서 확인하기 위한 한국어 절차입니다. 대상 profile은 <code>kis-paper-sdk</code>, <code>kis-live-sdk-readonly</code>, <code>kis-paper-trade</code>, <code>kis-live-trade</code>입니다.</p>
+              <ul>
+                <li><a href="https://apiportal.koreainvestment.com/" target="_blank" rel="noreferrer">KIS 개발자 포털</a></li>
+                <li><a href="https://github.com/koreainvestment/open-trading-api" target="_blank" rel="noreferrer">공식 open-trading-api 샘플 저장소</a></li>
+                <li><a href="https://github.com/koreainvestment/open-trading-api/tree/main/examples_user/domestic_stock" target="_blank" rel="noreferrer">국내주식 WebSocket 샘플</a></li>
+                <li><a href="https://github.com/koreainvestment/kis-ai-extensions" target="_blank" rel="noreferrer">KIS AI agent 확장 참고</a></li>
+              </ul>
+              <p>KIS 개발자 포털은 REST 방식과 WebSocket 방식을 모두 안내합니다. WebSocket 방식은 접속키 발급 뒤 socket에 연결해 실시간 데이터를 수신하는 구조입니다. Vibe-Trading의 KIS WebSocket smoke는 공식 샘플의 국내주식 실시간 체결가, 호가, 체결통보 TR 계약을 작게 감싼 credential-gated 확인 흐름입니다.</p>
+            `
+          },
+          {
+            id: "prerequisites",
+            title: "준비물",
+            body: `
+              <ol>
+                <li>KIS Open API 서비스 신청이 완료된 계정.</li>
+                <li>모의투자 또는 실전투자용 app key와 app secret.</li>
+                <li><code>~/.vibe-trading/kis.json</code> 로컬 설정 파일. 이 파일은 저장소에 커밋하지 않습니다.</li>
+                <li>체결통보 채널(<code>ccnl_notice</code>)을 확인하려면 KIS Developers HTS ID.</li>
+              </ol>
+              <pre><code>{
+  "profile": "paper",
+  "app_key": "YOUR_KIS_APP_KEY",
+  "app_secret": "YOUR_KIS_APP_SECRET",
+  "account": "12345678",
+  "account_product_code": "01"
+}</code></pre>
+              <p><code>profile</code>은 <code>paper</code>, <code>live-readonly</code>, <code>live</code> 중 하나입니다. 실전 profile에서 smoke를 실행하려면 코드와 명령 모두에서 live opt-in을 요구합니다.</p>
+            `
+          },
+          {
+            id: "dry-run",
+            title: "Dry-run 확인",
+            body: `
+              <p>기본 명령은 broker call을 하지 않습니다. credential이나 network가 준비되지 않은 CI, 리뷰 환경, 문서 검증에서는 이 명령을 먼저 사용합니다.</p>
+              <pre><code>vibe-trading connector kis-websocket-smoke \\
+  --profile kis-paper-sdk \\
+  --channel ccnl_krx \\
+  --tr-key 005930 \\
+  --evidence-path ~/.vibe-trading/evidence/kis-websocket-smoke-ccnl-krx.json</code></pre>
+              <p>예상 결과는 <code>status=not_run</code>, <code>network=not_attempted</code>, <code>evidence_path=null</code>입니다. 이 상태는 실패가 아니라 안전 기본값입니다. 실제 KIS approval key 발급, WebSocket 연결, evidence 파일 생성은 <code>--allow-broker-calls</code>가 있어야 진행됩니다.</p>
+            `
+          },
+          {
+            id: "credentialed-smoke",
+            title: "Credentialed smoke",
+            body: `
+              <p>모의투자 또는 읽기 전용 실전 계정이 준비된 뒤에만 broker call을 켭니다.</p>
+              <pre><code>vibe-trading connector kis-websocket-smoke \\
+  --profile kis-paper-sdk \\
+  --channel ccnl_krx \\
+  --tr-key 005930 \\
+  --evidence-path ~/.vibe-trading/evidence/kis-websocket-smoke-ccnl-krx.json \\
+  --max-messages 3 \\
+  --message-timeout 10 \\
+  --allow-broker-calls</code></pre>
+              <p>실전 profile에서는 추가로 <code>--allow-live</code>가 필요합니다.</p>
+              <pre><code>vibe-trading connector kis-websocket-smoke \\
+  --profile kis-live-sdk-readonly \\
+  --channel asking_price_krx \\
+  --tr-key 005930 \\
+  --evidence-path ~/.vibe-trading/evidence/kis-websocket-smoke-asking-price-krx.json \\
+  --max-messages 3 \\
+  --message-timeout 10 \\
+  --allow-broker-calls \\
+  --allow-live</code></pre>
+              <p>실전 주문 profile인 <code>kis-live-trade</code>는 live order mandate, kill switch, pre-trade gate, audit ledger의 적용 대상입니다. WebSocket smoke 자체는 읽기/수신 확인용이지만, 실전 profile 접근은 별도 live opt-in 없이는 차단합니다.</p>
+            `
+          },
+          {
+            id: "channels",
+            title: "채널 선택",
+            body: `
+              <ul>
+                <li><code>ccnl_krx</code>: 공식 TR <code>H0STCNT0</code>. <code>--tr-key</code>는 국내주식 종목코드입니다. 예: <code>005930</code>. KRX 실시간 체결가 확인에 사용합니다.</li>
+                <li><code>asking_price_krx</code>: 공식 TR <code>H0STASP0</code>. <code>--tr-key</code>는 국내주식 종목코드입니다. KRX 실시간 호가 확인에 사용합니다.</li>
+                <li><code>ccnl_notice</code>: 공식 TR <code>H0STCNI0</code> / <code>H0STCNI9</code>. <code>--tr-key</code>는 KIS Developers HTS ID입니다. 실시간 체결통보 확인에 사용합니다.</li>
+              </ul>
+              <p>전체 지원 채널은 CLI의 <code>--channel</code> choices와 MCP tool schema enum으로 노출됩니다. 잘못된 채널 이름은 broker call 전에 거부됩니다.</p>
+            `
+          },
+          {
+            id: "evidence",
+            title: "Evidence 보관",
+            body: `
+              <p><code>--evidence-path</code>에는 로컬 전용 경로를 지정합니다. 권장 위치는 <code>~/.vibe-trading/evidence/</code>처럼 저장소 밖에 있는 디렉터리입니다.</p>
+              <ul>
+                <li>app key, app secret, access token은 기록하지 않습니다.</li>
+                <li>subscription에는 <code>tr_key</code> 원문 대신 <code>tr_key_present</code>만 남깁니다.</li>
+                <li>sample payload는 이벤트 종류와 필드 개수 중심으로 축약하고 redaction을 한 번 더 적용합니다.</li>
+                <li>approval key 원문, 계좌번호, 주문 원문 frame은 저장하지 않습니다.</li>
+              </ul>
+              <p>그래도 broker evidence에는 계정의 사용 시각, profile, endpoint, 수신 상태가 포함될 수 있으므로 public PR이나 공개 문서에 원본 JSON을 붙이지 않습니다. 공개 PR에는 결과 요약과 redaction 방침만 남기고, credentialed evidence 파일은 로컬에 보관합니다.</p>
+            `
+          },
+          {
+            id: "mcp-tool",
+            title: "MCP tool 경로",
+            body: `
+              <p>MCP client에서는 <code>trading_kis_websocket_smoke</code> tool을 사용합니다. 필수 인자는 <code>channel</code>, <code>tr_key</code>, <code>evidence_path</code>입니다. <code>allow_broker_calls</code> 기본값은 <code>false</code>이며, 실전 profile은 <code>allow_live=true</code>도 요구합니다.</p>
+              <pre><code>{
+  "connection": "kis-paper-sdk",
+  "channel": "ccnl_krx",
+  "tr_key": "005930",
+  "evidence_path": "~/.vibe-trading/evidence/kis-websocket-smoke-ccnl-krx.json",
+  "max_messages": 3,
+  "message_timeout": 10,
+  "allow_broker_calls": true
+}</code></pre>
+            `
+          },
+          {
+            id: "non-claims",
+            title: "아직 claim하지 않는 것",
+            body: `
+              <p>이 runbook은 절차와 safety gate를 고정합니다. 다음 항목은 실제 계정 credential, KIS 서비스 신청 상태, 시장 시간, 증권사 이용 조건 확인 전까지 완료로 claim하지 않습니다.</p>
+              <ul>
+                <li>실제 KIS WebSocket에서 frame을 수신했다는 credentialed proof.</li>
+                <li>실전 주문 가능성 또는 실전 주문 권한.</li>
+                <li>KIS market data의 재배포, 저장, 공개 공유 허용 여부.</li>
+                <li>KRX/NXT/체결통보별 운영 한도와 rate-limit의 포괄 검증.</li>
+                <li>장중/장후/휴장일별 수신 품질 보장.</li>
+              </ul>
+              <p>Credentialed smoke를 수행한 뒤에는 로컬 evidence JSON을 검토하고, public PR에는 어떤 profile/channel을 어떤 opt-in으로 확인했는지와 원본 credential/evidence를 공개하지 않았다는 요약만 남깁니다.</p>
+            `
+          }
+        ]
+      },
+      {
         id: "tools/kiwoom-websocket-channel-catalog",
         title: "Kiwoom WebSocket Channel Catalog",
         description: "키움증권 REST OpenAPI WebSocket endpoint와 control frame metadata를 broker call 없이 확인합니다.",

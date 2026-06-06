@@ -942,6 +942,88 @@ def trading_kiwoom_websocket_smoke(
 
 
 @mcp.tool
+def trading_kis_websocket_smoke(
+    channel: str,
+    tr_key: str,
+    evidence_path: str,
+    connection: str | None = None,
+    host: str | None = None,
+    port: int | None = None,
+    client_id: int | None = None,
+    account: str | None = None,
+    max_messages: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+    max_samples: int = 3,
+    allow_broker_calls: bool = False,
+    allow_live: bool = False,
+) -> str:
+    """Run gated KIS WebSocket smoke/evidence through the selected profile.
+
+    This never places orders. Broker calls stay disabled unless the operator
+    explicitly sets ``allow_broker_calls``. Live profiles also require
+    ``allow_live``.
+
+    Args:
+        channel: KIS WebSocket channel key such as ccnl_krx.
+        tr_key: Subscription key such as a Korean stock code.
+        evidence_path: Local JSON path for redacted smoke evidence.
+        connection: Optional KIS broker SDK profile id. Defaults to the selected profile.
+        host: Optional local host override.
+        port: Optional local socket port override.
+        client_id: Optional local client id override.
+        account: Optional account code filter.
+        max_messages: Maximum messages to read before stopping.
+        message_timeout: Optional seconds to wait for each message.
+        connect_attempts: Initial WebSocket connection attempts.
+        connect_backoff_seconds: Backoff between initial connection attempts.
+        reconnect_attempts: Receive-side reconnect/resubscribe attempts.
+        reconnect_backoff_seconds: Backoff between reconnect attempts.
+        max_samples: Maximum redacted sample events to keep.
+        allow_broker_calls: Explicit opt-in for broker network calls.
+        allow_live: Explicit opt-in for live-profile smoke.
+    """
+    from src.trading.connectors.kis.sdk import KIS_WEBSOCKET_CHANNELS
+
+    channel_key = str(channel or "").strip().lower()
+    if channel_key not in KIS_WEBSOCKET_CHANNELS:
+        return json.dumps(
+            {
+                "status": "error",
+                "error_type": "validation",
+                "error": f"unsupported KIS WebSocket channel: {channel!r}",
+                "supported_channels": sorted(KIS_WEBSOCKET_CHANNELS),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    params = _trading_common_args(connection=connection, host=host, port=port, client_id=client_id, account=account)
+    params.update(
+        {
+            "channel": channel,
+            "tr_key": tr_key,
+            "evidence_path": evidence_path,
+            "max_messages": max_messages,
+            "connect_attempts": connect_attempts,
+            "connect_backoff_seconds": connect_backoff_seconds,
+            "reconnect_attempts": reconnect_attempts,
+            "reconnect_backoff_seconds": reconnect_backoff_seconds,
+            "max_samples": max_samples,
+            "allow_broker_calls": allow_broker_calls,
+            "allow_live": allow_live,
+        }
+    )
+    if message_timeout is not None:
+        params["message_timeout"] = message_timeout
+    registry = _get_registry()
+    return registry.execute("trading_kis_websocket_smoke", params)
+
+
+@mcp.tool
 def trading_kiwoom_websocket_channels() -> str:
     """List the local Kiwoom WebSocket channel catalog without broker calls."""
     registry = _get_registry()

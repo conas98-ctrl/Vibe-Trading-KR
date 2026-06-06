@@ -8,12 +8,15 @@ contract.
 
 from __future__ import annotations
 
+import asyncio
+from base64 import b64decode
 import json
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 from src.config.paths import get_runtime_root
+from src.tools.redaction import redact_payload
 from src.trading.connectors.kr_common import (
     KoreanConnectorConfig,
     KoreanConnectorConfigError,
@@ -583,6 +586,712 @@ def parse_websocket_orderbooks(message: str | bytes) -> list[dict[str, Any]]:
     return books
 
 
+def websocket_pingpong_payload(message: str | bytes) -> str | bytes | None:
+    """Return the raw KIS PINGPONG payload callers should send as ``pong``."""
+
+    parsed = parse_websocket_message(message)
+    if parsed.get("type") == "system" and parsed.get("is_pingpong") is True:
+        return message
+    return None
+
+
+class KisWebSocketConnection:
+    """Small adapter around a real WebSocket client connection."""
+
+    def __init__(self, socket: Any, manager: Any | None = None):
+        self._socket = socket
+        self._manager = manager
+
+    async def send_json(self, payload: Mapping[str, Any]) -> None:
+        await self._socket.send(json.dumps(payload, ensure_ascii=False))
+
+    async def receive(self) -> str | bytes:
+        return await self._socket.recv()
+
+    async def pong(self, payload: str | bytes) -> None:
+        await self._socket.pong(payload)
+
+    async def close(self) -> None:
+        if self._manager is not None:
+            await self._manager.__aexit__(None, None, None)
+            return
+        await self._socket.close()
+
+
+class KisWebSocketTransport:
+    """Connect to KIS' official WebSocket endpoint using ``websockets``."""
+
+    def __init__(self, connect_factory: Any | None = None):
+        self._connect_factory = connect_factory or _websockets_connect
+
+    async def connect(self, url: str) -> KisWebSocketConnection:
+        connection = self._connect_factory(url)
+        if hasattr(connection, "__await__"):
+            return KisWebSocketConnection(await connection)
+        if hasattr(connection, "__aenter__"):
+            return KisWebSocketConnection(await connection.__aenter__(), manager=connection)
+        return KisWebSocketConnection(connection)
+
+
+def create_websocket_transport() -> KisWebSocketTransport:
+    """Return the default KIS WebSocket transport."""
+
+    return KisWebSocketTransport()
+
+
+async def run_websocket_smoke(
+    config: KoreanConnectorConfig | None = None,
+    *,
+    channel: str,
+    tr_key: str,
+    client: Any | None = None,
+    transport: Any | None = None,
+    max_messages: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+) -> dict[str, Any]:
+    """Run a KIS WebSocket smoke flow."""
+
+    cfg = config or load_config()
+    injected_transport = transport is not None
+    missing = _missing_auth_fields(cfg)
+    if missing:
+        return {
+            "status": "not_configured",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "missing": missing,
+            "network": "not_attempted",
+        }
+    try:
+        message_target = int(max_messages)
+    except (TypeError, ValueError):
+        message_target = 0
+    if message_target < 1:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "max_messages",
+            "requested_value": max_messages,
+            "received_frames": 0,
+            "pong_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "KIS WebSocket smoke max_messages must be a positive integer.",
+        }
+    timeout_seconds: float | None = None
+    if message_timeout is not None:
+        try:
+            timeout_seconds = float(message_timeout)
+        except (TypeError, ValueError):
+            timeout_seconds = 0.0
+        if timeout_seconds <= 0:
+            return {
+                "status": "invalid_request",
+                "connector": CONNECTOR,
+                "profile": cfg.profile,
+                "environment": cfg.environment,
+                "network": "not_attempted",
+                "parameter": "message_timeout",
+                "requested_value": message_timeout,
+                "received_frames": 0,
+                "pong_frames": 0,
+                "sample_payloads": [],
+                "subscription_events": [],
+                "frame_errors": [],
+                "reason": "KIS WebSocket smoke message_timeout must be a positive number.",
+            }
+    try:
+        connect_attempt_count = int(connect_attempts)
+    except (TypeError, ValueError):
+        connect_attempt_count = 0
+    if connect_attempt_count < 1:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "connect_attempts",
+            "requested_value": connect_attempts,
+            "received_frames": 0,
+            "pong_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "KIS WebSocket smoke connect_attempts must be a positive integer.",
+        }
+    try:
+        reconnect_budget = int(reconnect_attempts)
+    except (TypeError, ValueError):
+        reconnect_budget = -1
+    if reconnect_budget < 0:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "reconnect_attempts",
+            "requested_value": reconnect_attempts,
+            "received_frames": 0,
+            "pong_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "KIS WebSocket smoke reconnect_attempts must be a non-negative integer.",
+        }
+    try:
+        connect_backoff = float(connect_backoff_seconds)
+    except (TypeError, ValueError):
+        connect_backoff = -1.0
+    if connect_backoff < 0:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "connect_backoff_seconds",
+            "requested_value": connect_backoff_seconds,
+            "received_frames": 0,
+            "pong_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "KIS WebSocket smoke connect_backoff_seconds must be a non-negative number.",
+        }
+    try:
+        reconnect_backoff = float(reconnect_backoff_seconds)
+    except (TypeError, ValueError):
+        reconnect_backoff = -1.0
+    if reconnect_backoff < 0:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "reconnect_backoff_seconds",
+            "requested_value": reconnect_backoff_seconds,
+            "received_frames": 0,
+            "pong_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "KIS WebSocket smoke reconnect_backoff_seconds must be a non-negative number.",
+        }
+    channel_key = str(channel or "").strip().lower()
+    channel_spec = KIS_WEBSOCKET_CHANNELS.get(channel_key)
+    if channel_spec is None:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "channel",
+            "requested_value": channel,
+            "received_frames": 0,
+            "pong_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "KIS WebSocket smoke channel must be a supported KIS WebSocket channel.",
+        }
+    normalized_tr_key = str(tr_key or "").strip()
+    if channel_spec.get("tr_key") == "symbol":
+        normalized_tr_key = _normalize_kr_symbol(normalized_tr_key)
+    if not normalized_tr_key:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "tr_key",
+            "requested_value": tr_key,
+            "received_frames": 0,
+            "pong_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": f"KIS WebSocket channel {channel!r} requires a tr_key.",
+        }
+    if transport is None:
+        try:
+            transport = create_websocket_transport()
+        except KoreanConnectorConfigError as exc:
+            return {
+                "status": "not_configured",
+                "connector": CONNECTOR,
+                "profile": cfg.profile,
+                "missing": ["websockets"],
+                "network": "not_attempted",
+                "error": str(exc),
+            }
+
+    try:
+        approval_key = issue_websocket_approval_key(cfg, client=client)
+    except Exception as exc:
+        return {
+            "status": "approval_error",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "approval_request",
+            "approval": "failed",
+            "received_frames": 0,
+            "pong_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": f"KIS WebSocket approval-key request failed: {str(exc) or exc.__class__.__name__}",
+        }
+    subscription = build_websocket_subscribe_message(tr_key, channel=channel, approval_key=approval_key, config=cfg)
+    uri = websocket_url(cfg)
+    socket, connection_attempts, connect_error = await _connect_websocket_with_retries(
+        transport,
+        uri,
+        connect_attempts=connect_attempt_count,
+        connect_backoff_seconds=connect_backoff,
+    )
+    total_connection_attempts = connection_attempts
+    reconnects = 0
+    input_spec = dict(subscription["body"]["input"])
+    if socket is None:
+        return {
+            "status": "connection_error",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "injected_transport" if injected_transport else "websocket_transport",
+            "uri": uri,
+            "approval": "issued",
+            "subscription": {"channel": channel, "tr_id": input_spec["tr_id"], "tr_key": input_spec["tr_key"]},
+            "received_frames": 0,
+            "pong_frames": 0,
+            "sample_payloads": [],
+            "frame_errors": [],
+            "connection_attempts": total_connection_attempts,
+            "reconnects": reconnects,
+            "reason": f"KIS WebSocket transport failed to connect after {connection_attempts} attempt(s): {connect_error}",
+        }
+    sample_payloads: list[dict[str, Any]] = []
+    subscription_events: list[dict[str, Any]] = []
+    frame_errors: list[dict[str, Any]] = []
+    received_frames = 0
+    pong_frames = 0
+    try:
+        await socket.send_json(subscription)
+        while received_frames < message_target:
+            try:
+                raw = await _receive_websocket_message(socket, message_timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                return {
+                    "status": "timeout",
+                    "connector": CONNECTOR,
+                    "profile": cfg.profile,
+                    "environment": cfg.environment,
+                    "network": "injected_transport" if injected_transport else "websocket_transport",
+                    "uri": websocket_url(cfg),
+                    "approval": "issued",
+                    "subscription": {"channel": channel, "tr_id": input_spec["tr_id"], "tr_key": input_spec["tr_key"]},
+                    "received_frames": received_frames,
+                    "pong_frames": pong_frames,
+                    "sample_payloads": sample_payloads,
+                    "subscription_events": subscription_events,
+                    "frame_errors": frame_errors,
+                    "connection_attempts": total_connection_attempts,
+                    "reconnects": reconnects,
+                    "timeout_seconds": timeout_seconds,
+                    "reason": "KIS WebSocket smoke exceeded message_timeout while waiting for a frame.",
+                }
+            except Exception as exc:
+                if reconnects >= reconnect_budget:
+                    return {
+                        "status": "connection_error",
+                        "connector": CONNECTOR,
+                        "profile": cfg.profile,
+                        "environment": cfg.environment,
+                        "network": "injected_transport" if injected_transport else "websocket_transport",
+                        "uri": websocket_url(cfg),
+                        "approval": "issued",
+                        "subscription": {
+                            "channel": channel,
+                            "tr_id": input_spec["tr_id"],
+                            "tr_key": input_spec["tr_key"],
+                        },
+                        "received_frames": received_frames,
+                        "pong_frames": pong_frames,
+                        "sample_payloads": sample_payloads,
+                        "subscription_events": subscription_events,
+                        "frame_errors": frame_errors,
+                        "connection_attempts": total_connection_attempts,
+                        "reconnects": reconnects,
+                        "reason": (
+                            "KIS WebSocket transport disconnected while receiving a frame: "
+                            f"{str(exc) or exc.__class__.__name__}"
+                        ),
+                    }
+                await socket.close()
+                socket = None
+                if reconnect_backoff:
+                    await asyncio.sleep(reconnect_backoff)
+                next_socket, reconnect_connection_attempts, reconnect_error = await _connect_websocket_with_retries(
+                    transport,
+                    uri,
+                    connect_attempts=connect_attempt_count,
+                    connect_backoff_seconds=connect_backoff,
+                )
+                total_connection_attempts += reconnect_connection_attempts
+                reconnects += 1
+                if next_socket is None:
+                    return {
+                        "status": "connection_error",
+                        "connector": CONNECTOR,
+                        "profile": cfg.profile,
+                        "environment": cfg.environment,
+                        "network": "injected_transport" if injected_transport else "websocket_transport",
+                        "uri": websocket_url(cfg),
+                        "approval": "issued",
+                        "subscription": {
+                            "channel": channel,
+                            "tr_id": input_spec["tr_id"],
+                            "tr_key": input_spec["tr_key"],
+                        },
+                        "received_frames": received_frames,
+                        "pong_frames": pong_frames,
+                        "sample_payloads": sample_payloads,
+                        "subscription_events": subscription_events,
+                        "frame_errors": frame_errors,
+                        "connection_attempts": total_connection_attempts,
+                        "reconnects": reconnects,
+                        "reason": (
+                            "KIS WebSocket transport failed to reconnect after "
+                            f"{reconnect_connection_attempts} attempt(s): {reconnect_error}"
+                        ),
+                    }
+                socket = next_socket
+                await socket.send_json(subscription)
+                continue
+            received_frames += 1
+            pong_payload = websocket_pingpong_payload(raw)
+            if pong_payload is not None:
+                await socket.pong(pong_payload)
+                pong_frames += 1
+                continue
+            parsed = parse_websocket_message(raw, channel=channel)
+            if parsed.get("type") == "error":
+                frame_error = _websocket_frame_error(parsed)
+                frame_errors.append(frame_error)
+                return {
+                    "status": "frame_error",
+                    "connector": CONNECTOR,
+                    "profile": cfg.profile,
+                    "environment": cfg.environment,
+                    "network": "injected_transport" if injected_transport else "websocket_transport",
+                    "uri": websocket_url(cfg),
+                    "approval": "issued",
+                    "subscription": {
+                        "channel": channel,
+                        "tr_id": input_spec["tr_id"],
+                        "tr_key": input_spec["tr_key"],
+                    },
+                    "received_frames": received_frames,
+                    "pong_frames": pong_frames,
+                    "sample_payloads": sample_payloads,
+                    "subscription_events": subscription_events,
+                    "frame_errors": frame_errors,
+                    "connection_attempts": total_connection_attempts,
+                    "reconnects": reconnects,
+                    "reason": f"KIS WebSocket smoke received an invalid frame: {frame_error.get('error')}",
+                }
+            if parsed.get("type") == "system":
+                subscription_event = _websocket_subscription_event(parsed)
+                subscription_events.append(subscription_event)
+                if subscription_event.get("status") == "error":
+                    return {
+                        "status": "subscription_error",
+                        "connector": CONNECTOR,
+                        "profile": cfg.profile,
+                        "environment": cfg.environment,
+                        "network": "injected_transport" if injected_transport else "websocket_transport",
+                        "uri": websocket_url(cfg),
+                        "approval": "issued",
+                        "subscription": {
+                            "channel": channel,
+                            "tr_id": input_spec["tr_id"],
+                            "tr_key": input_spec["tr_key"],
+                        },
+                        "received_frames": received_frames,
+                        "pong_frames": pong_frames,
+                        "sample_payloads": sample_payloads,
+                        "subscription_events": subscription_events,
+                        "frame_errors": frame_errors,
+                        "connection_attempts": total_connection_attempts,
+                        "reconnects": reconnects,
+                        "reason": f"KIS WebSocket subscription failed: {subscription_event.get('message')}",
+                    }
+            if parsed.get("type") == "data":
+                sample_payloads.append(parsed)
+    finally:
+        if socket is not None:
+            await socket.close()
+
+    return {
+        "status": "ok",
+        "connector": CONNECTOR,
+        "profile": cfg.profile,
+        "environment": cfg.environment,
+        "network": "injected_transport" if injected_transport else "websocket_transport",
+        "uri": websocket_url(cfg),
+        "approval": "issued",
+        "subscription": {"channel": channel, "tr_id": input_spec["tr_id"], "tr_key": input_spec["tr_key"]},
+        "received_frames": received_frames,
+        "pong_frames": pong_frames,
+        "sample_payloads": sample_payloads,
+        "subscription_events": subscription_events,
+        "frame_errors": frame_errors,
+        "connection_attempts": total_connection_attempts,
+        "reconnects": reconnects,
+    }
+
+
+async def _connect_websocket_with_retries(
+    transport: Any,
+    uri: str,
+    *,
+    connect_attempts: int,
+    connect_backoff_seconds: float,
+) -> tuple[Any | None, int, str | None]:
+    try:
+        attempts = max(1, int(connect_attempts))
+    except (TypeError, ValueError):
+        attempts = 1
+    try:
+        backoff_seconds = max(0.0, float(connect_backoff_seconds))
+    except (TypeError, ValueError):
+        backoff_seconds = 0.0
+
+    last_error: str | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await transport.connect(uri), attempt, None
+        except Exception as exc:
+            last_error = str(exc) or exc.__class__.__name__
+            if attempt >= attempts:
+                return None, attempt, last_error
+            if backoff_seconds:
+                await asyncio.sleep(backoff_seconds)
+    return None, attempts, last_error
+
+
+async def _receive_websocket_message(socket: Any, *, message_timeout: float | None) -> str | bytes:
+    receive = socket.receive()
+    if message_timeout is None:
+        return await receive
+    return await asyncio.wait_for(receive, timeout=max(0.0, float(message_timeout)))
+
+
+def _websocket_subscription_event(parsed: Mapping[str, Any]) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "tr_id": parsed.get("tr_id"),
+        "status": parsed.get("status"),
+        "message": parsed.get("message"),
+        "encrypted": bool(parsed.get("encrypted")),
+        "iv_present": bool(parsed.get("iv_present") or parsed.get("iv")),
+        "key_present": bool(parsed.get("key_present") or parsed.get("key")),
+    }
+    return {key: value for key, value in event.items() if value is not None}
+
+
+def _websocket_frame_error(parsed: Mapping[str, Any]) -> dict[str, Any]:
+    error = parsed.get("error") or parsed.get("message") or "invalid KIS WebSocket frame"
+    return {"status": str(parsed.get("status") or "error"), "error": str(error)}
+
+
+def _websockets_connect(url: str) -> Any:
+    try:
+        import websockets
+    except ModuleNotFoundError as exc:
+        raise KoreanConnectorConfigError("KIS WebSocket transport requires the websockets package.") from exc
+    return websockets.connect(url)
+
+
+def websocket_smoke_evidence(result: Mapping[str, Any], *, max_samples: int = 3) -> dict[str, Any]:
+    """Return a credential-safe evidence summary for a KIS WebSocket smoke run."""
+
+    source = dict(result or {})
+    subscription = dict(source.get("subscription") or {}) if isinstance(source.get("subscription"), Mapping) else {}
+    channel = str(subscription.get("channel") or "").strip()
+    channel_spec = KIS_WEBSOCKET_CHANNELS.get(channel.lower(), {})
+    safe_subscription: dict[str, Any] = {
+        "channel": subscription.get("channel"),
+        "tr_id": subscription.get("tr_id"),
+        "tr_key_present": bool(subscription.get("tr_key")),
+    }
+    if channel_spec.get("tr_key"):
+        safe_subscription["tr_key_kind"] = channel_spec["tr_key"]
+
+    try:
+        sample_limit = max(0, int(max_samples))
+    except (TypeError, ValueError):
+        sample_limit = 3
+    samples = _as_list(source.get("sample_payloads"))
+    subscription_events = _as_list(source.get("subscription_events"))
+    frame_errors = _as_list(source.get("frame_errors"))
+
+    evidence = {
+        "status": source.get("status"),
+        "connector": source.get("connector") or CONNECTOR,
+        "profile": source.get("profile"),
+        "environment": source.get("environment"),
+        "network": source.get("network"),
+        "uri": source.get("uri"),
+        "approval": source.get("approval"),
+        "subscription": safe_subscription,
+        "received_frames": source.get("received_frames"),
+        "pong_frames": source.get("pong_frames"),
+        "subscription_events": [_websocket_subscription_event(event) for event in subscription_events],
+        "frame_errors": [_websocket_frame_error(error) for error in frame_errors],
+        "sample_count": len(samples),
+        "sample_payloads": [_websocket_smoke_evidence_sample(sample) for sample in samples[:sample_limit]],
+    }
+    for key in ("reason", "timeout_seconds", "connection_attempts", "reconnects", "parameter", "requested_value"):
+        if key in source:
+            evidence[key] = source.get(key)
+    return evidence
+
+
+def write_websocket_smoke_evidence(
+    result: Mapping[str, Any],
+    path: str | Path,
+    *,
+    max_samples: int = 3,
+) -> Path:
+    """Write a credential-safe KIS WebSocket smoke evidence JSON artifact."""
+
+    target = Path(path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    evidence = websocket_smoke_evidence(result, max_samples=max_samples)
+    target.write_text(json.dumps(evidence, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    return target
+
+
+async def run_websocket_smoke_with_evidence(
+    config: KoreanConnectorConfig | None = None,
+    *,
+    channel: str,
+    tr_key: str,
+    evidence_path: str | Path,
+    client: Any | None = None,
+    transport: Any | None = None,
+    max_messages: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+    max_samples: int = 3,
+    allow_broker_calls: bool = False,
+    allow_live: bool = False,
+) -> dict[str, Any]:
+    """Run a gated KIS WebSocket smoke flow and write redacted evidence."""
+
+    cfg = config or load_config()
+    if not allow_broker_calls:
+        return {
+            "status": "not_run",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "reason": "KIS WebSocket smoke requires allow_broker_calls=True before any credentialed broker call.",
+        }
+    if cfg.environment == "live" and not allow_live:
+        return {
+            "status": "blocked",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "reason": "Live KIS WebSocket smoke requires allow_live=True.",
+        }
+
+    evidence_target = Path(evidence_path).expanduser()
+    if evidence_target.exists() and evidence_target.is_dir():
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "parameter": "evidence_path",
+            "requested_value": str(evidence_target),
+            "reason": "KIS WebSocket smoke evidence_path must be a file path, not a directory.",
+        }
+    if evidence_target.parent.exists() and not evidence_target.parent.is_dir():
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "parameter": "evidence_path",
+            "requested_value": str(evidence_target),
+            "reason": "KIS WebSocket smoke evidence_path parent directory must be a directory.",
+        }
+
+    result = await run_websocket_smoke(
+        cfg,
+        channel=channel,
+        tr_key=tr_key,
+        client=client,
+        transport=transport,
+        max_messages=max_messages,
+        message_timeout=message_timeout,
+        connect_attempts=connect_attempts,
+        connect_backoff_seconds=connect_backoff_seconds,
+        reconnect_attempts=reconnect_attempts,
+        reconnect_backoff_seconds=reconnect_backoff_seconds,
+    )
+    written = write_websocket_smoke_evidence(result, evidence_target, max_samples=max_samples)
+    evidence = websocket_smoke_evidence(result, max_samples=max_samples)
+    evidence["evidence_path"] = str(written)
+    return evidence
+
+
+def _websocket_smoke_evidence_sample(sample: Mapping[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key in ("type", "status", "prefix", "tr_id", "sequence"):
+        if key in sample:
+            safe[key] = sample.get(key)
+    event = sample.get("event")
+    if isinstance(event, Mapping):
+        safe["event"] = redact_payload(dict(event))
+    for source_key, evidence_key in (
+        ("fields", "field_count"),
+        ("raw_fields", "raw_field_count"),
+        ("raw_values", "raw_value_count"),
+    ):
+        value = sample.get(source_key)
+        if isinstance(value, (Mapping, list, tuple)):
+            safe[evidence_key] = len(value)
+    return redact_payload(safe)
+
+
 def parse_websocket_order_notices(message: str | bytes) -> list[dict[str, Any]]:
     """Parse decrypted official KIS ``H0STCNI0``/``H0STCNI9`` order notice frames."""
 
@@ -616,6 +1325,39 @@ def parse_websocket_order_notices(message: str | bytes) -> list[dict[str, Any]]:
         fields = {name: row_values[pos] for pos, name in enumerate(KIS_WEBSOCKET_NOTICE_FIELDS)}
         notices.append(_websocket_order_notice(tr_id, fields, row_values, encrypted_flag=encrypted_flag))
     return notices
+
+
+def decrypt_websocket_payload(cipher_text: str, *, key: str, iv: str) -> str:
+    """Decrypt KIS AES256-CBC/Base64 WebSocket notice payloads."""
+
+    clean_key = str(key or "").strip()
+    clean_iv = str(iv or "").strip()
+    if not clean_key or not clean_iv:
+        raise KoreanConnectorConfigError("KIS WebSocket decrypt requires key and iv from the subscription response.")
+    try:
+        from Crypto.Cipher import AES
+        from Crypto.Util.Padding import unpad
+    except ImportError as exc:  # pragma: no cover - exercised only in environments missing declared dependency
+        raise KoreanConnectorConfigError("KIS WebSocket decrypt requires the pycryptodome package.") from exc
+
+    try:
+        cipher = AES.new(clean_key.encode("utf-8"), AES.MODE_CBC, clean_iv.encode("utf-8"))
+        plain = unpad(cipher.decrypt(b64decode(str(cipher_text or ""))), AES.block_size)
+        return plain.decode("utf-8")
+    except Exception as exc:  # noqa: BLE001 - normalize crypto/base64/padding failures for callers
+        raise KoreanConnectorConfigError(f"KIS WebSocket decrypt failed: {exc}") from exc
+
+
+def parse_websocket_encrypted_order_notices(message: str | bytes, *, key: str, iv: str) -> list[dict[str, Any]]:
+    """Decrypt and parse official encrypted KIS order notice frames."""
+
+    raw = message.decode("utf-8") if isinstance(message, bytes) else str(message or "")
+    parts = raw.split("|", 3)
+    if len(parts) != 4 or parts[0] != "1":
+        raise KoreanConnectorConfigError("KIS WebSocket decrypt expected an encrypted order notice frame.")
+    encrypted_flag, tr_id, declared_count, cipher_text = parts
+    payload = decrypt_websocket_payload(cipher_text, key=key, iv=iv)
+    return parse_websocket_order_notices(f"{encrypted_flag}|{tr_id}|{declared_count}|{payload}")
 
 
 def get_quote(symbol: str, *, config: KoreanConnectorConfig | None = None, client: Any | None = None, **_: Any) -> dict[str, Any]:

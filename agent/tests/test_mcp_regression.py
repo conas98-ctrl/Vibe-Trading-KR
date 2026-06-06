@@ -178,6 +178,7 @@ def test_mcp_server_exposes_well_known_tool_names() -> None:
         "trading_history",
         "trading_kiwoom_websocket_smoke",
         "trading_kiwoom_websocket_channels",
+        "trading_kis_websocket_smoke",
     }
     missing = expected - registered
     assert not missing, (
@@ -318,10 +319,57 @@ def test_trading_kiwoom_websocket_smoke_mcp_wrapper_forwards_safety_payload(
     ]
 
 
+def test_trading_kis_websocket_smoke_mcp_wrapper_forwards_safety_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KIS WebSocket smoke MCP calls should preserve explicit safety flags."""
+    mod = _import_mcp_server_with_fake_fastmcp(monkeypatch)
+    registry = _RecordingRegistry()
+    monkeypatch.setattr(mod, "_get_registry", lambda: registry)
+
+    mod.trading_kis_websocket_smoke(
+        channel="ccnl_krx",
+        tr_key="005930",
+        evidence_path="/tmp/kis-websocket-smoke.json",
+        connection="kis-paper-sdk",
+        max_messages=2,
+        message_timeout=1.5,
+        connect_attempts=3,
+        connect_backoff_seconds=0.25,
+        reconnect_attempts=1,
+        reconnect_backoff_seconds=0.5,
+        max_samples=1,
+        allow_broker_calls=False,
+        allow_live=False,
+    )
+
+    assert registry.calls == [
+        (
+            "trading_kis_websocket_smoke",
+            {
+                "connection": "kis-paper-sdk",
+                "channel": "ccnl_krx",
+                "tr_key": "005930",
+                "evidence_path": "/tmp/kis-websocket-smoke.json",
+                "max_messages": 2,
+                "message_timeout": 1.5,
+                "connect_attempts": 3,
+                "connect_backoff_seconds": 0.25,
+                "reconnect_attempts": 1,
+                "reconnect_backoff_seconds": 0.5,
+                "max_samples": 1,
+                "allow_broker_calls": False,
+                "allow_live": False,
+            },
+        )
+    ]
+
+
 def test_trading_kiwoom_websocket_smoke_mcp_wrapper_rejects_unknown_channel_before_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Unknown Kiwoom WebSocket channels should not reach the backend registry."""
+
     mod = _import_mcp_server_with_fake_fastmcp(monkeypatch)
     registry = _RecordingRegistry()
     monkeypatch.setattr(mod, "_get_registry", lambda: registry)
@@ -338,6 +386,30 @@ def test_trading_kiwoom_websocket_smoke_mcp_wrapper_rejects_unknown_channel_befo
     assert result["status"] == "error"
     assert "unsupported Kiwoom WebSocket channel" in result["error"]
     assert "domestic_stock_realtime" in result["supported_channels"]
+    assert registry.calls == []
+
+
+def test_trading_kis_websocket_smoke_mcp_wrapper_rejects_unknown_channel_before_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown KIS WebSocket channels should not reach the backend registry."""
+
+    mod = _import_mcp_server_with_fake_fastmcp(monkeypatch)
+    registry = _RecordingRegistry()
+    monkeypatch.setattr(mod, "_get_registry", lambda: registry)
+
+    result = json.loads(
+        mod.trading_kis_websocket_smoke(
+            channel="bogus",
+            tr_key="005930",
+            evidence_path="/tmp/kis-websocket-smoke.json",
+            connection="kis-paper-sdk",
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "unsupported KIS WebSocket channel" in result["error"]
+    assert "ccnl_krx" in result["supported_channels"]
     assert registry.calls == []
 
 

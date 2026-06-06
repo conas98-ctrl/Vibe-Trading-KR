@@ -11,6 +11,7 @@ from typing import Any
 
 from src.agent.tools import BaseTool
 from src.trading.connectors.kiwoom.sdk import KIWOOM_WEBSOCKET_ENDPOINTS
+from src.trading.connectors.kis.sdk import KIS_WEBSOCKET_CHANNELS
 from src.trading.profiles import (
     list_profiles,
     load_selected_profile_id,
@@ -25,8 +26,8 @@ from src.trading.service import (
     get_open_orders,
     get_positions,
     get_quote,
-    place_order,
     run_websocket_smoke_with_evidence,
+    place_order,
 )
 
 
@@ -261,6 +262,75 @@ class TradingKiwoomWebSocketSmokeTool(BaseTool):
                     _connection(kwargs.get("connection")),
                     channel=str(kwargs.get("channel") or "domestic_stock_realtime").strip(),
                     symbols=_string_list(kwargs["symbols"]),
+                    evidence_path=str(kwargs["evidence_path"]).strip(),
+                    max_messages=_int_or_default(kwargs.get("max_messages"), 3),
+                    message_timeout=_num_or_none(kwargs.get("message_timeout")),
+                    connect_attempts=_int_or_default(kwargs.get("connect_attempts"), 1),
+                    connect_backoff_seconds=_float_or_default(kwargs.get("connect_backoff_seconds"), 0.0),
+                    reconnect_attempts=_int_or_default(kwargs.get("reconnect_attempts"), 0),
+                    reconnect_backoff_seconds=_float_or_default(kwargs.get("reconnect_backoff_seconds"), 0.0),
+                    max_samples=_int_or_default(kwargs.get("max_samples"), 3),
+                    allow_broker_calls=_bool_or_default(kwargs.get("allow_broker_calls"), False),
+                    allow_live=_bool_or_default(kwargs.get("allow_live"), False),
+                    **_overrides(kwargs),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _json_result({"status": "error", "error": str(exc)})
+
+
+class TradingKisWebSocketSmokeTool(BaseTool):
+    """Run the gated KIS WebSocket smoke/evidence flow through a profile."""
+
+    name = "trading_kis_websocket_smoke"
+    description = (
+        "Run the KIS domestic-stock WebSocket smoke/evidence flow through a KIS "
+        "broker SDK profile. Defaults to dry-run safety gates; set "
+        "allow_broker_calls only when operator-approved credentials are ready."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            **TRADING_COMMON_PARAMETERS,
+            "channel": {
+                "type": "string",
+                "enum": sorted(KIS_WEBSOCKET_CHANNELS),
+                "description": "KIS WebSocket channel key, e.g. ccnl_krx or ccnl_notice.",
+            },
+            "tr_key": {
+                "type": "string",
+                "description": "Subscription key, e.g. a Korean stock code such as 005930.",
+            },
+            "evidence_path": {
+                "type": "string",
+                "description": "Local JSON file path for redacted smoke evidence.",
+            },
+            "max_messages": {"type": "integer", "default": 3},
+            "message_timeout": {
+                "type": "number",
+                "description": "Optional seconds to wait for each message.",
+            },
+            "connect_attempts": {"type": "integer", "default": 1},
+            "connect_backoff_seconds": {"type": "number", "default": 0.0},
+            "reconnect_attempts": {"type": "integer", "default": 0},
+            "reconnect_backoff_seconds": {"type": "number", "default": 0.0},
+            "max_samples": {"type": "integer", "default": 3},
+            "allow_broker_calls": {"type": "boolean", "default": False},
+            "allow_live": {"type": "boolean", "default": False},
+        },
+        "required": ["channel", "tr_key", "evidence_path"],
+    }
+    repeatable = True
+    is_readonly = False
+
+    def execute(self, **kwargs: Any) -> str:
+        """Run KIS WebSocket smoke evidence through the profile-scoped service."""
+        try:
+            return _json_result(
+                run_websocket_smoke_with_evidence(
+                    _connection(kwargs.get("connection")),
+                    channel=str(kwargs["channel"]).strip(),
+                    tr_key=str(kwargs["tr_key"]).strip(),
                     evidence_path=str(kwargs["evidence_path"]).strip(),
                     max_messages=_int_or_default(kwargs.get("max_messages"), 3),
                     message_timeout=_num_or_none(kwargs.get("message_timeout")),

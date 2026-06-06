@@ -701,6 +701,8 @@ Vibe-Trading은 모든 MCP-compatible client를 위해 37개 MCP tools를 제공
 
 Kiwoom 국내주식 REST WebSocket smoke를 실행하거나 credentialed evidence를 남길 때는 [Kiwoom WebSocket Smoke Runbook](https://vibetrading.wiki/docs/latest/tools/kiwoom-websocket-smoke-runbook)을 먼저 확인하세요. 기본값은 broker call을 하지 않으며, 실제 Kiwoom REST OpenAPI WebSocket 호출은 `--allow-broker-calls`와 실전 profile의 `--allow-live`로 명시적으로 열립니다.
 
+KIS 국내주식 WebSocket smoke를 실행하거나 credentialed evidence를 남길 때는 [KIS WebSocket Smoke Runbook](https://vibetrading.wiki/docs/latest/tools/kis-websocket-smoke-runbook)을 먼저 확인하세요. 기본값은 broker call을 하지 않으며, 실제 KIS 호출은 `--allow-broker-calls`와 실전 profile의 `--allow-live`로 명시적으로 열립니다.
+
 <details>
 <summary><b>Claude Desktop</b></summary>
 

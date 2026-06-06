@@ -178,6 +178,8 @@
   background: #101312;
   color: #edf5ef;
   margin: 18px 0 0;
+  overflow-x: auto;
+  padding: 18px;
 }
 
 .doc-section code {

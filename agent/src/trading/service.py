@@ -207,9 +207,10 @@ def get_history(
 def run_websocket_smoke_with_evidence(
     profile_id: str | None = None,
     *,
-    channel: str = "domestic_stock_realtime",
-    symbols: list[str] | tuple[str, ...],
     evidence_path: Any,
+    channel: str = "domestic_stock_realtime",
+    symbols: list[str] | tuple[str, ...] | None = None,
+    tr_key: str | None = None,
     max_messages: int = 3,
     message_timeout: float | None = None,
     connect_attempts: int = 1,
@@ -221,9 +222,9 @@ def run_websocket_smoke_with_evidence(
     allow_live: bool = False,
     **overrides: Any,
 ) -> dict[str, Any]:
-    """Run a Kiwoom profile-scoped WebSocket smoke flow and write redacted evidence."""
+    """Run a profile-scoped WebSocket smoke flow and write redacted evidence."""
     profile = profile_by_id(profile_id)
-    if profile.connector != "kiwoom" or profile.transport != "broker_sdk":
+    if profile.connector not in {"kiwoom", "kis"} or profile.transport != "broker_sdk":
         return _unsupported(profile, "websocket_smoke.run")
 
     module = _sdk_module(profile.connector)
@@ -232,21 +233,27 @@ def run_websocket_smoke_with_evidence(
         return _unsupported(profile, "websocket_smoke.run")
 
     config = module.build_config(profile.config, overrides)
+    smoke_kwargs: dict[str, Any] = {
+        "channel": channel,
+        "evidence_path": evidence_path,
+        "max_messages": max_messages,
+        "message_timeout": message_timeout,
+        "connect_attempts": connect_attempts,
+        "connect_backoff_seconds": connect_backoff_seconds,
+        "reconnect_attempts": reconnect_attempts,
+        "reconnect_backoff_seconds": reconnect_backoff_seconds,
+        "max_samples": max_samples,
+        "allow_broker_calls": allow_broker_calls,
+        "allow_live": allow_live,
+    }
+    if profile.connector == "kiwoom":
+        smoke_kwargs["symbols"] = list(symbols or [])
+    else:
+        smoke_kwargs["tr_key"] = str(tr_key or "").strip()
     result = asyncio.run(
         runner(
             config,
-            channel=channel,
-            symbols=symbols,
-            evidence_path=evidence_path,
-            max_messages=max_messages,
-            message_timeout=message_timeout,
-            connect_attempts=connect_attempts,
-            connect_backoff_seconds=connect_backoff_seconds,
-            reconnect_attempts=reconnect_attempts,
-            reconnect_backoff_seconds=reconnect_backoff_seconds,
-            max_samples=max_samples,
-            allow_broker_calls=allow_broker_calls,
-            allow_live=allow_live,
+            **smoke_kwargs,
         )
     )
     return _with_profile(profile, result)

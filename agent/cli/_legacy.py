@@ -3766,6 +3766,52 @@ def cmd_connector_kiwoom_websocket_smoke(
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]Kiwoom WebSocket smoke failed:[/red] {rich_escape(str(exc))}")
         return EXIT_RUN_FAILED
+
+    console.print_json(data=result)
+    if result.get("status") in {"ok", "not_run", "blocked", "planned"}:
+        return EXIT_SUCCESS
+    return EXIT_RUN_FAILED
+
+
+def cmd_connector_kis_websocket_smoke(
+    profile_id: Optional[str] = None,
+    *,
+    channel: str,
+    tr_key: str,
+    evidence_path: Path,
+    max_messages: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+    max_samples: int = 3,
+    allow_broker_calls: bool = False,
+    allow_live: bool = False,
+) -> int:
+    """Run or plan a gated KIS WebSocket smoke evidence capture."""
+    from src.trading.service import run_websocket_smoke_with_evidence
+
+    try:
+        result = run_websocket_smoke_with_evidence(
+            _profile_id(profile_id),
+            channel=channel,
+            tr_key=tr_key,
+            evidence_path=evidence_path,
+            max_messages=max_messages,
+            message_timeout=message_timeout,
+            connect_attempts=connect_attempts,
+            connect_backoff_seconds=connect_backoff_seconds,
+            reconnect_attempts=reconnect_attempts,
+            reconnect_backoff_seconds=reconnect_backoff_seconds,
+            max_samples=max_samples,
+            allow_broker_calls=allow_broker_calls,
+            allow_live=allow_live,
+        )
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]KIS WebSocket smoke failed:[/red] {rich_escape(str(exc))}")
+        return EXIT_RUN_FAILED
+
     console.print_json(data=result)
     if result.get("status") in {"ok", "not_run", "blocked", "planned"}:
         return EXIT_SUCCESS
@@ -4116,6 +4162,22 @@ def _dispatch_connector(args: argparse.Namespace) -> int:
             args.profile,
             channel=args.channel,
             symbols=args.symbols,
+            evidence_path=args.evidence_path,
+            max_messages=args.max_messages,
+            message_timeout=args.message_timeout,
+            connect_attempts=args.connect_attempts,
+            connect_backoff_seconds=args.connect_backoff_seconds,
+            reconnect_attempts=args.reconnect_attempts,
+            reconnect_backoff_seconds=args.reconnect_backoff_seconds,
+            max_samples=args.max_samples,
+            allow_broker_calls=args.allow_broker_calls,
+            allow_live=args.allow_live,
+        )
+    if sub == "kis-websocket-smoke":
+        return cmd_connector_kis_websocket_smoke(
+            args.profile,
+            channel=args.channel,
+            tr_key=args.tr_key,
             evidence_path=args.evidence_path,
             max_messages=args.max_messages,
             message_timeout=args.message_timeout,
@@ -4651,6 +4713,30 @@ def _build_parser() -> argparse.ArgumentParser:
         "kiwoom-websocket-channels",
         help="Print the local Kiwoom WebSocket channel catalog",
     )
+    connector_kis_ws_smoke = connector_subparsers.add_parser(
+        "kis-websocket-smoke",
+        help="Run or plan a gated KIS WebSocket smoke evidence capture",
+    )
+    from src.trading.connectors.kis.sdk import KIS_WEBSOCKET_CHANNELS
+
+    connector_kis_ws_smoke.add_argument("--profile", default=None, help="KIS SDK profile id (default: selected)")
+    connector_kis_ws_smoke.add_argument(
+        "--channel",
+        choices=sorted(KIS_WEBSOCKET_CHANNELS),
+        required=True,
+        help="KIS WebSocket channel, e.g. ccnl_krx",
+    )
+    connector_kis_ws_smoke.add_argument("--tr-key", dest="tr_key", required=True, help="KIS transaction key, e.g. 005930")
+    connector_kis_ws_smoke.add_argument("--evidence-path", type=Path, required=True, help="Output path for redacted smoke evidence")
+    connector_kis_ws_smoke.add_argument("--max-messages", type=int, default=3)
+    connector_kis_ws_smoke.add_argument("--message-timeout", type=float, default=None)
+    connector_kis_ws_smoke.add_argument("--connect-attempts", type=int, default=1)
+    connector_kis_ws_smoke.add_argument("--connect-backoff-seconds", type=float, default=0.0)
+    connector_kis_ws_smoke.add_argument("--reconnect-attempts", type=int, default=0)
+    connector_kis_ws_smoke.add_argument("--reconnect-backoff-seconds", type=float, default=0.0)
+    connector_kis_ws_smoke.add_argument("--max-samples", type=int, default=3)
+    connector_kis_ws_smoke.add_argument("--allow-broker-calls", action="store_true", help="Actually call read-only KIS WebSocket APIs")
+    connector_kis_ws_smoke.add_argument("--allow-live", action="store_true", help="Allow live KIS profile checks in addition to --allow-broker-calls")
 
     for name, help_text in (
         ("start", "Start the selected live connector runner"),

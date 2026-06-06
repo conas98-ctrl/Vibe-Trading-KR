@@ -10,7 +10,7 @@ import pytest
 from src.trading import profiles, service
 from src.tools import build_registry
 from src.tools import trading_connector_tool
-from src.tools.trading_connector_tool import TradingSelectConnectionTool
+from src.tools.trading_connector_tool import TradingKisWebSocketSmokeTool, TradingSelectConnectionTool
 
 pytestmark = pytest.mark.unit
 
@@ -151,10 +151,88 @@ def test_kiwoom_websocket_smoke_tool_routes_to_profile_scoped_service(
     ]
 
 
+def test_kis_websocket_smoke_tool_routes_to_profile_scoped_service(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """The local tool should expose #121's gated service without touching the broker."""
+    calls: list[dict] = []
+
+    def fake_smoke_runner(profile_id, **kwargs):
+        calls.append({"profile_id": profile_id, "kwargs": kwargs})
+        return {
+            "status": "not_run",
+            "profile_id": profile_id,
+            "connector": "kis",
+            "network": "not_attempted",
+            "evidence_path": None,
+        }
+
+    monkeypatch.setattr(
+        trading_connector_tool,
+        "run_websocket_smoke_with_evidence",
+        fake_smoke_runner,
+        raising=False,
+    )
+
+    target = tmp_path / "kis-websocket-smoke.json"
+    result = TradingKisWebSocketSmokeTool().execute(
+        connection="kis-paper-sdk",
+        channel="ccnl_krx",
+        tr_key="005930",
+        evidence_path=str(target),
+        max_messages="2",
+        message_timeout="1.5",
+        connect_attempts="3",
+        connect_backoff_seconds="0.25",
+        reconnect_attempts="1",
+        reconnect_backoff_seconds="0.5",
+        max_samples="1",
+        allow_broker_calls=False,
+        allow_live=False,
+    )
+
+    payload = json.loads(result)
+    assert payload["status"] == "not_run"
+    assert payload["profile_id"] == "kis-paper-sdk"
+    assert calls == [
+        {
+            "profile_id": "kis-paper-sdk",
+            "kwargs": {
+                "channel": "ccnl_krx",
+                "tr_key": "005930",
+                "evidence_path": str(target),
+                "max_messages": 2,
+                "message_timeout": 1.5,
+                "connect_attempts": 3,
+                "connect_backoff_seconds": 0.25,
+                "reconnect_attempts": 1,
+                "reconnect_backoff_seconds": 0.5,
+                "max_samples": 1,
+                "allow_broker_calls": False,
+                "allow_live": False,
+                "host": None,
+                "port": None,
+                "client_id": None,
+                "account": None,
+            },
+        }
+    ]
+
+
 def test_kiwoom_websocket_smoke_tool_registers_as_local_write_tool() -> None:
     """The smoke evidence tool is local-registry only in this slice."""
     registry = build_registry(include_shell_tools=False)
     tool = registry.get("trading_kiwoom_websocket_smoke")
+
+    assert tool is not None
+    assert tool.repeatable is True
+    assert tool.is_readonly is False
+
+
+def test_kis_websocket_smoke_tool_registers_as_local_write_tool() -> None:
+    """The smoke evidence tool is local-registry only in this slice."""
+    registry = build_registry(include_shell_tools=False)
+    tool = registry.get("trading_kis_websocket_smoke")
 
     assert tool is not None
     assert tool.repeatable is True
@@ -198,6 +276,18 @@ def test_kiwoom_websocket_channels_tool_registers_as_local_readonly_tool() -> No
     assert tool is not None
     assert tool.repeatable is True
     assert tool.is_readonly is True
+
+
+def test_kis_websocket_smoke_tool_schema_exposes_supported_channels() -> None:
+    """Agent-callable smoke metadata should surface the official channel catalog."""
+    from src.trading.connectors.kis.sdk import KIS_WEBSOCKET_CHANNELS
+
+    channel_schema = TradingKisWebSocketSmokeTool.parameters["properties"]["channel"]
+
+    assert channel_schema["enum"] == sorted(KIS_WEBSOCKET_CHANNELS)
+    assert "ccnl_krx" in channel_schema["enum"]
+    assert "asking_price_krx" in channel_schema["enum"]
+    assert "bogus" not in channel_schema["enum"]
 
 
 def test_live_broker_mcp_wrappers_are_hidden_from_agent_registry(monkeypatch: pytest.MonkeyPatch) -> None:

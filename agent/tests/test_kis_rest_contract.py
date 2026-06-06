@@ -6,6 +6,8 @@ open-trading-api sample surface without requiring live KIS credentials.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from urllib.parse import urlparse
 
 import pytest
@@ -113,6 +115,171 @@ class _KisClient:
                 headers={"tr_cont": ""},
             )
         raise AssertionError(f"unexpected GET {path}")
+
+
+class _ApprovalFailureKisClient(_KisClient):
+    def post(self, url, *, json=None, headers=None, timeout=None):
+        path = urlparse(url).path
+        self.calls.append({"method": "POST", "path": path, "json": json, "headers": headers or {}})
+        if path == "/oauth2/Approval":
+            raise RuntimeError("approval service unavailable")
+        raise AssertionError(f"unexpected POST {path}")
+
+
+class _KisSocket:
+    def __init__(self):
+        self.sent_json: list[dict] = []
+        self.pongs: list[str | bytes] = []
+        self.closed = False
+        self.messages: list[str | bytes] = [
+            '{"header":{"tr_id":"H0STCNT0","tr_key":"005930","encrypt":"N"},"body":{"rt_cd":"0","msg1":"SUBSCRIBE SUCCESS"}}',
+            b'{"header":{"tr_id":"PINGPONG"}}',
+            "0|H0STCNT0|001|005930^153000^70000^2^1000^1.45^69500^69000^71000^68000^70100^70000^15",
+        ]
+
+    async def send_json(self, payload):
+        self.sent_json.append(payload)
+
+    async def receive(self):
+        return self.messages.pop(0)
+
+    async def pong(self, payload):
+        self.pongs.append(payload)
+
+    async def close(self):
+        self.closed = True
+
+
+class _KisTransport:
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _KisSocket()
+
+    async def connect(self, url):
+        self.urls.append(url)
+        return self.socket
+
+
+class _NoticeAckKisSocket(_KisSocket):
+    def __init__(self):
+        super().__init__()
+        self.messages = [
+            (
+                '{"header":{"tr_id":"H0STCNI9","tr_key":"MYHTSID","encrypt":"Y"},'
+                '"body":{"rt_cd":"0","msg1":"SUBSCRIBE SUCCESS","output":{"iv":"iv-123","key":"key-123"}}}'
+            )
+        ]
+
+
+class _NoticeAckKisTransport(_KisTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _NoticeAckKisSocket()
+
+
+class _NoticeErrorKisSocket(_KisSocket):
+    def __init__(self):
+        super().__init__()
+        self.messages = [
+            (
+                '{"header":{"tr_id":"H0STCNI9","tr_key":"MYHTSID","encrypt":"N"},'
+                '"body":{"rt_cd":"1","msg1":"SUBSCRIBE DENIED","output":{"iv":"iv-denied","key":"key-denied"}}}'
+            )
+        ]
+
+
+class _NoticeErrorKisTransport(_KisTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _NoticeErrorKisSocket()
+
+
+class _MalformedFrameKisSocket(_KisSocket):
+    def __init__(self):
+        super().__init__()
+        self.messages = ["malformed-frame"]
+
+
+class _MalformedFrameKisTransport(_KisTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _MalformedFrameKisSocket()
+
+
+class _HangingKisSocket(_KisSocket):
+    async def receive(self):
+        await asyncio.sleep(1)
+
+
+class _HangingKisTransport(_KisTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _HangingKisSocket()
+
+
+class _FlakyKisTransport(_KisTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _KisSocket()
+        self.failures_remaining = 1
+
+    async def connect(self, url):
+        self.urls.append(url)
+        if self.failures_remaining:
+            self.failures_remaining -= 1
+            raise OSError("temporary connect failure")
+        return self.socket
+
+
+class _FailingKisTransport(_KisTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _KisSocket()
+
+    async def connect(self, url):
+        self.urls.append(url)
+        raise OSError("temporary connect failure")
+
+
+class _DisconnectingKisSocket(_KisSocket):
+    async def receive(self):
+        raise ConnectionError("socket dropped after subscribe")
+
+
+class _ReconnectKisTransport:
+    def __init__(self):
+        self.urls: list[str] = []
+        self.sockets: list[_KisSocket] = [_DisconnectingKisSocket(), _KisSocket()]
+        self._index = 0
+
+    async def connect(self, url):
+        self.urls.append(url)
+        socket = self.sockets[self._index]
+        self._index += 1
+        return socket
+
+
+class _WebSocketClient:
+    def __init__(self):
+        self.sent: list[str] = []
+        self.pongs: list[str | bytes] = []
+        self.closed = False
+        self.messages: list[str | bytes] = [
+            b'{"header":{"tr_id":"PINGPONG"}}',
+            "0|H0STCNT0|001|005930^153000^70000",
+        ]
+
+    async def send(self, payload):
+        self.sent.append(payload)
+
+    async def recv(self):
+        return self.messages.pop(0)
+
+    async def pong(self, payload):
+        self.pongs.append(payload)
+
+    async def close(self):
+        self.closed = True
 
 
 def _cfg(profile="paper") -> KoreanConnectorConfig:
@@ -236,6 +403,13 @@ def test_kis_parse_websocket_trade_and_system_frames() -> None:
     assert system["encrypted"] is True
     assert system["iv"] == "iv-123"
     assert system["key"] == "key-123"
+
+    pingpong = b'{"header":{"tr_id":"PINGPONG"}}'
+    pingpong_event = kis.parse_websocket_message(pingpong)
+    assert pingpong_event["type"] == "system"
+    assert pingpong_event["is_pingpong"] is True
+    assert kis.websocket_pingpong_payload(pingpong) == pingpong
+    assert kis.websocket_pingpong_payload(system) is None
 
 
 def _kis_trade_values(
@@ -421,6 +595,1254 @@ def test_kis_websocket_orderbook_parser_rejects_wrong_or_truncated_frames() -> N
         kis.parse_websocket_orderbooks(f"0|H0STASP0|001|{truncated}")
 
 
+def test_kis_websocket_smoke_uses_approval_subscribe_pingpong_and_samples() -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=3,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["network"] == "injected_transport"
+    assert result["uri"] == "ws://ops.koreainvestment.com:31000"
+    assert result["approval"] == "issued"
+    assert result["subscription"] == {"channel": "ccnl_krx", "tr_id": "H0STCNT0", "tr_key": "005930"}
+    assert result["received_frames"] == 3
+    assert result["pong_frames"] == 1
+    assert result["sample_payloads"][0]["tr_id"] == "H0STCNT0"
+    assert result["sample_payloads"][0]["event"]["symbol"] == "005930"
+    assert transport.urls == ["ws://ops.koreainvestment.com:31000"]
+    assert transport.socket.sent_json == [
+        {
+            "header": {
+                "content-type": "utf-8",
+                "approval_key": "approval-123",
+                "tr_type": "1",
+                "custtype": "P",
+            },
+            "body": {"input": {"tr_id": "H0STCNT0", "tr_key": "005930"}},
+        }
+    ]
+    assert transport.socket.pongs == [b'{"header":{"tr_id":"PINGPONG"}}']
+    assert transport.socket.closed is True
+    assert client.calls[0]["path"] == "/oauth2/Approval"
+    assert json.dumps(result["sample_payloads"], sort_keys=True)
+
+
+def test_kis_websocket_smoke_records_subscription_ack_key_presence() -> None:
+    client = _KisClient()
+    transport = _NoticeAckKisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_notice",
+            tr_key="MYHTSID",
+            client=client,
+            transport=transport,
+            max_messages=1,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["subscription"] == {"channel": "ccnl_notice", "tr_id": "H0STCNI9", "tr_key": "MYHTSID"}
+    assert result["received_frames"] == 1
+    assert result["subscription_events"] == [
+        {
+            "tr_id": "H0STCNI9",
+            "status": "ok",
+            "message": "SUBSCRIBE SUCCESS",
+            "encrypted": True,
+            "iv_present": True,
+            "key_present": True,
+        }
+    ]
+    assert transport.socket.closed is True
+
+
+def test_kis_websocket_smoke_evidence_redacts_subscription_ack_secrets() -> None:
+    result = {
+        "status": "ok",
+        "connector": "kis",
+        "profile": "paper",
+        "environment": "paper",
+        "network": "injected_transport",
+        "uri": "ws://ops.koreainvestment.com:31000",
+        "approval": "issued",
+        "subscription": {"channel": "ccnl_notice", "tr_id": "H0STCNI9", "tr_key": "MYHTSID"},
+        "subscription_events": [
+            {
+                "tr_id": "H0STCNI9",
+                "status": "ok",
+                "message": "SUBSCRIBE SUCCESS",
+                "encrypted": True,
+                "tr_key": "MYHTSID",
+                "iv": "iv-123",
+                "key": "key-123",
+                "iv_present": True,
+                "key_present": True,
+            }
+        ],
+        "received_frames": 1,
+        "pong_frames": 0,
+        "sample_payloads": [],
+    }
+
+    evidence = kis.websocket_smoke_evidence(result)
+
+    assert evidence["subscription_events"] == [
+        {
+            "tr_id": "H0STCNI9",
+            "status": "ok",
+            "message": "SUBSCRIBE SUCCESS",
+            "encrypted": True,
+            "iv_present": True,
+            "key_present": True,
+        }
+    ]
+    serialized = json.dumps(evidence, sort_keys=True)
+    assert "MYHTSID" not in serialized
+    assert "iv-123" not in serialized
+    assert "key-123" not in serialized
+
+
+def test_kis_websocket_smoke_fails_closed_on_subscription_error_ack() -> None:
+    client = _KisClient()
+    transport = _NoticeErrorKisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_notice",
+            tr_key="MYHTSID",
+            client=client,
+            transport=transport,
+            max_messages=1,
+        )
+    )
+
+    assert result["status"] == "subscription_error"
+    assert result["received_frames"] == 1
+    assert result["sample_payloads"] == []
+    assert result["subscription_events"] == [
+        {
+            "tr_id": "H0STCNI9",
+            "status": "error",
+            "message": "SUBSCRIBE DENIED",
+            "encrypted": False,
+            "iv_present": True,
+            "key_present": True,
+        }
+    ]
+    assert "SUBSCRIBE DENIED" in result["reason"]
+    assert transport.socket.closed is True
+
+
+def test_kis_websocket_smoke_with_evidence_writes_subscription_error_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _NoticeErrorKisTransport()
+    target = tmp_path / "subscription-error" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_notice",
+            tr_key="MYHTSID",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "subscription_error"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "subscription_error"
+    assert payload["subscription_events"][0]["message"] == "SUBSCRIBE DENIED"
+    assert "SUBSCRIBE DENIED" in payload["reason"]
+    serialized = json.dumps(payload, sort_keys=True)
+    assert "MYHTSID" not in serialized
+    assert "iv-denied" not in serialized
+    assert "key-denied" not in serialized
+
+
+def test_kis_websocket_smoke_fails_closed_on_malformed_frame() -> None:
+    client = _KisClient()
+    transport = _MalformedFrameKisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=1,
+        )
+    )
+
+    assert result["status"] == "frame_error"
+    assert result["received_frames"] == 1
+    assert result["sample_payloads"] == []
+    assert len(result["frame_errors"]) == 1
+    assert result["frame_errors"][0]["status"] == "error"
+    assert result["frame_errors"][0]["error"]
+    assert result["frame_errors"][0]["error"] in result["reason"]
+    assert "malformed-frame" not in json.dumps(result, sort_keys=True)
+    assert transport.socket.closed is True
+
+
+def test_kis_websocket_smoke_with_evidence_writes_frame_error_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _MalformedFrameKisTransport()
+    target = tmp_path / "frame-error" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "frame_error"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "frame_error"
+    assert len(payload["frame_errors"]) == 1
+    assert payload["frame_errors"][0]["status"] == "error"
+    assert payload["frame_errors"][0]["error"]
+    assert payload["frame_errors"][0]["error"] in payload["reason"]
+    serialized = json.dumps(payload, sort_keys=True)
+    assert "malformed-frame" not in serialized
+    assert "005930" not in serialized
+
+
+def test_kis_websocket_smoke_rejects_non_positive_max_messages_before_network() -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=0,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "max_messages"
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert "positive integer" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_kis_websocket_smoke_with_evidence_writes_invalid_max_messages_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "invalid-max-messages" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=0,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "max_messages"
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "positive integer" in payload["reason"]
+    serialized = json.dumps(payload, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_kis_websocket_smoke_rejects_non_positive_message_timeout_before_network() -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=1,
+            message_timeout=0,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "message_timeout"
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert "positive number" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_kis_websocket_smoke_with_evidence_writes_invalid_message_timeout_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "invalid-message-timeout" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+            message_timeout=0,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "message_timeout"
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "positive number" in payload["reason"]
+    serialized = json.dumps(payload, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_kis_websocket_smoke_rejects_invalid_connect_attempts_before_network() -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=1,
+            connect_attempts=0,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "connect_attempts"
+    assert result["requested_value"] == 0
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert "positive integer" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_kis_websocket_smoke_with_evidence_writes_invalid_connect_attempts_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "invalid-connect-attempts" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+            connect_attempts=0,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "connect_attempts"
+    assert payload["requested_value"] == 0
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "positive integer" in payload["reason"]
+    serialized = json.dumps(payload, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_kis_websocket_smoke_rejects_invalid_reconnect_attempts_before_network() -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=1,
+            reconnect_attempts=-1,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "reconnect_attempts"
+    assert result["requested_value"] == -1
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert "non-negative integer" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_kis_websocket_smoke_with_evidence_writes_invalid_reconnect_attempts_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "invalid-reconnect-attempts" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+            reconnect_attempts=-1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "reconnect_attempts"
+    assert payload["requested_value"] == -1
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "non-negative integer" in payload["reason"]
+    serialized = json.dumps(payload, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_kis_websocket_smoke_rejects_invalid_connect_backoff_before_network() -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=1,
+            connect_backoff_seconds=-0.1,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "connect_backoff_seconds"
+    assert result["requested_value"] == -0.1
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert "non-negative number" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_kis_websocket_smoke_with_evidence_writes_invalid_connect_backoff_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "invalid-connect-backoff" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+            connect_backoff_seconds=-0.1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "connect_backoff_seconds"
+    assert payload["requested_value"] == -0.1
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "non-negative number" in payload["reason"]
+    serialized = json.dumps(payload, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_kis_websocket_smoke_rejects_invalid_reconnect_backoff_before_network() -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=1,
+            reconnect_backoff_seconds=-0.1,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "reconnect_backoff_seconds"
+    assert result["requested_value"] == -0.1
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert "non-negative number" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_kis_websocket_smoke_with_evidence_writes_invalid_reconnect_backoff_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "invalid-reconnect-backoff" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+            reconnect_backoff_seconds=-0.1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "reconnect_backoff_seconds"
+    assert payload["requested_value"] == -0.1
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "non-negative number" in payload["reason"]
+    serialized = json.dumps(payload, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_kis_websocket_smoke_rejects_unknown_channel_before_approval() -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="unknown_channel",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=1,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "channel"
+    assert result["requested_value"] == "unknown_channel"
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert "supported KIS WebSocket channel" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_kis_websocket_smoke_with_evidence_writes_unknown_channel_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "invalid-channel" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="unknown_channel",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "channel"
+    assert payload["requested_value"] == "unknown_channel"
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "supported KIS WebSocket channel" in payload["reason"]
+    serialized = json.dumps(payload, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_kis_websocket_smoke_rejects_empty_tr_key_before_approval() -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="",
+            client=client,
+            transport=transport,
+            max_messages=1,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "tr_key"
+    assert result["requested_value"] == ""
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert "requires a tr_key" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_kis_websocket_smoke_with_evidence_writes_empty_tr_key_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "invalid-tr-key" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "tr_key"
+    assert payload["requested_value"] == ""
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "requires a tr_key" in payload["reason"]
+    serialized = json.dumps(payload, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_kis_websocket_transport_adapter_sends_json_receives_pongs_and_closes() -> None:
+    socket = _WebSocketClient()
+    calls: list[str] = []
+
+    async def connect(url):
+        calls.append(url)
+        return socket
+
+    async def exercise() -> None:
+        transport = kis.KisWebSocketTransport(connect_factory=connect)
+        active = await transport.connect("ws://ops.koreainvestment.com:31000")
+        await active.send_json({"body": {"input": {"tr_id": "H0STCNT0", "tr_key": "005930"}}})
+        assert await active.receive() == b'{"header":{"tr_id":"PINGPONG"}}'
+        await active.pong(b'{"header":{"tr_id":"PINGPONG"}}')
+        await active.close()
+
+    asyncio.run(exercise())
+
+    assert calls == ["ws://ops.koreainvestment.com:31000"]
+    assert json.loads(socket.sent[0]) == {"body": {"input": {"tr_id": "H0STCNT0", "tr_key": "005930"}}}
+    assert socket.pongs == [b'{"header":{"tr_id":"PINGPONG"}}']
+    assert socket.closed is True
+
+
+def test_kis_websocket_smoke_uses_default_transport_factory(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    calls: list[str] = []
+
+    def factory():
+        calls.append("factory")
+        return transport
+
+    monkeypatch.setattr(kis, "create_websocket_transport", factory)
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            max_messages=3,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["network"] == "websocket_transport"
+    assert calls == ["factory"]
+    assert transport.urls == ["ws://ops.koreainvestment.com:31000"]
+    assert client.calls[0]["path"] == "/oauth2/Approval"
+
+
+def test_kis_websocket_smoke_returns_approval_error_without_socket_connect() -> None:
+    client = _ApprovalFailureKisClient()
+    transport = _KisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=1,
+        )
+    )
+
+    assert result["status"] == "approval_error"
+    assert result["network"] == "approval_request"
+    assert result["approval"] == "failed"
+    assert result["received_frames"] == 0
+    assert result["pong_frames"] == 0
+    assert result["sample_payloads"] == []
+    assert result["subscription_events"] == []
+    assert result["frame_errors"] == []
+    assert "approval service unavailable" in result["reason"]
+    assert client.calls[0]["path"] == "/oauth2/Approval"
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_kis_websocket_smoke_with_evidence_writes_approval_error_summary(tmp_path) -> None:
+    client = _ApprovalFailureKisClient()
+    transport = _KisTransport()
+    target = tmp_path / "approval-error" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "approval_error"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "approval_error"
+    assert payload["network"] == "approval_request"
+    assert payload["approval"] == "failed"
+    assert payload["received_frames"] == 0
+    assert payload["subscription"]["tr_key_present"] is False
+    assert "approval service unavailable" in payload["reason"]
+    assert "005930" not in json.dumps(payload, sort_keys=True)
+    assert transport.urls == []
+
+
+def test_kis_websocket_smoke_retries_connect_failure_before_subscribe() -> None:
+    client = _KisClient()
+    transport = _FlakyKisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=3,
+            connect_attempts=2,
+            connect_backoff_seconds=0,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["connection_attempts"] == 2
+    assert transport.urls == [
+        "ws://ops.koreainvestment.com:31000",
+        "ws://ops.koreainvestment.com:31000",
+    ]
+    assert len(transport.socket.sent_json) == 1
+    assert transport.socket.closed is True
+
+
+def test_kis_websocket_smoke_with_evidence_writes_connection_error_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _FailingKisTransport()
+    target = tmp_path / "connection-error" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=3,
+            connect_attempts=2,
+            connect_backoff_seconds=0,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "connection_error"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "connection_error"
+    assert payload["connection_attempts"] == 2
+    assert "temporary connect failure" in payload["reason"]
+    assert "005930" not in json.dumps(payload, sort_keys=True)
+
+
+def test_kis_websocket_smoke_reconnects_and_resubscribes_after_receive_drop() -> None:
+    client = _KisClient()
+    transport = _ReconnectKisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=3,
+            reconnect_attempts=1,
+            reconnect_backoff_seconds=0,
+        )
+    )
+
+    first_socket, second_socket = transport.sockets
+    assert result["status"] == "ok"
+    assert result["reconnects"] == 1
+    assert result["connection_attempts"] == 2
+    assert transport.urls == [
+        "ws://ops.koreainvestment.com:31000",
+        "ws://ops.koreainvestment.com:31000",
+    ]
+    assert len(first_socket.sent_json) == 1
+    assert first_socket.sent_json == second_socket.sent_json
+    assert first_socket.closed is True
+    assert second_socket.closed is True
+
+
+def test_kis_websocket_smoke_with_evidence_writes_reconnect_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _ReconnectKisTransport()
+    target = tmp_path / "reconnect" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=3,
+            reconnect_attempts=1,
+            reconnect_backoff_seconds=0,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "ok"
+    assert result["reconnects"] == 1
+    assert result["connection_attempts"] == 2
+    assert payload["status"] == "ok"
+    assert payload["reconnects"] == 1
+    assert payload["connection_attempts"] == 2
+    assert payload["subscription"]["tr_key_present"] is True
+    assert "tr_key" not in payload["subscription"]
+
+
+def test_kis_websocket_smoke_times_out_and_closes_socket() -> None:
+    client = _KisClient()
+    transport = _HangingKisTransport()
+
+    result = asyncio.run(
+        kis.run_websocket_smoke(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=3,
+            message_timeout=0.001,
+        )
+    )
+
+    assert result["status"] == "timeout"
+    assert result["network"] == "injected_transport"
+    assert result["received_frames"] == 0
+    assert result["pong_frames"] == 0
+    assert result["sample_payloads"] == []
+    assert result["timeout_seconds"] == 0.001
+    assert "message_timeout" in result["reason"]
+    assert transport.socket.closed is True
+
+
+def test_kis_websocket_smoke_with_evidence_writes_timeout_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _HangingKisTransport()
+    target = tmp_path / "timeout" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=3,
+            message_timeout=0.001,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "timeout"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "timeout"
+    assert payload["timeout_seconds"] == 0.001
+    assert "message_timeout" in payload["reason"]
+    assert "005930" not in json.dumps(payload, sort_keys=True)
+
+
+def test_kis_websocket_smoke_evidence_redacts_subscription_and_sample_values() -> None:
+    result = {
+        "status": "ok",
+        "connector": "kis",
+        "profile": "paper",
+        "environment": "paper",
+        "network": "injected_transport",
+        "uri": "ws://ops.koreainvestment.com:31000",
+        "approval": "issued",
+        "subscription": {"channel": "ccnl_notice", "tr_id": "H0STCNI9", "tr_key": "MYHTSID"},
+        "received_frames": 2,
+        "pong_frames": 1,
+        "sample_payloads": [
+            {
+                "type": "data",
+                "status": "ok",
+                "prefix": "1",
+                "tr_id": "H0STCNI9",
+                "sequence": "001",
+                "fields": {"CUST_ID": "MYHTSID", "ACNT_NO": "12345678-01", "STCK_SHRN_ISCD": "005930"},
+                "raw_values": ["MYHTSID", "12345678-01", "0000012345"],
+                "event": {"symbol": "005930", "account_number": "12345678", "access_token": "secret-token"},
+            }
+        ],
+    }
+
+    evidence = kis.websocket_smoke_evidence(result)
+
+    assert evidence["subscription"] == {
+        "channel": "ccnl_notice",
+        "tr_id": "H0STCNI9",
+        "tr_key_present": True,
+        "tr_key_kind": "hts_id",
+    }
+    assert evidence["sample_count"] == 1
+    sample = evidence["sample_payloads"][0]
+    assert sample["event"] == {
+        "symbol": "005930",
+        "account_number": "[redacted]",
+        "access_token": "[redacted]",
+    }
+    assert sample["field_count"] == 3
+    assert sample["raw_value_count"] == 3
+    assert "fields" not in sample
+    assert "raw_values" not in sample
+    serialized = json.dumps(evidence, sort_keys=True)
+    assert "MYHTSID" not in serialized
+    assert "12345678" not in serialized
+    assert "secret-token" not in serialized
+
+
+def test_kis_write_websocket_smoke_evidence_saves_redacted_json(tmp_path) -> None:
+    result = {
+        "status": "ok",
+        "connector": "kis",
+        "profile": "paper",
+        "environment": "paper",
+        "network": "injected_transport",
+        "uri": "ws://ops.koreainvestment.com:31000",
+        "approval": "issued",
+        "subscription": {"channel": "ccnl_notice", "tr_id": "H0STCNI9", "tr_key": "MYHTSID"},
+        "received_frames": 2,
+        "pong_frames": 1,
+        "sample_payloads": [
+            {
+                "type": "data",
+                "status": "ok",
+                "prefix": "1",
+                "tr_id": "H0STCNI9",
+                "sequence": "001",
+                "fields": {"CUST_ID": "MYHTSID", "ACNT_NO": "12345678-01"},
+                "raw_values": ["MYHTSID", "12345678-01", "0000012345"],
+                "event": {"symbol": "005930", "account_number": "12345678", "access_token": "secret-token"},
+            }
+        ],
+    }
+    target = tmp_path / "nested" / "kis-websocket-smoke.json"
+
+    written = kis.write_websocket_smoke_evidence(result, target)
+
+    assert written == target
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload["subscription"] == {
+        "channel": "ccnl_notice",
+        "tr_id": "H0STCNI9",
+        "tr_key_present": True,
+        "tr_key_kind": "hts_id",
+    }
+    assert payload["sample_payloads"][0]["event"]["access_token"] == "[redacted]"
+    serialized = json.dumps(payload, sort_keys=True)
+    assert "MYHTSID" not in serialized
+    assert "12345678" not in serialized
+    assert "secret-token" not in serialized
+    assert "raw_values" not in serialized
+
+
+def test_kis_websocket_smoke_with_evidence_requires_broker_call_opt_in(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+        )
+    )
+
+    assert result["status"] == "not_run"
+    assert result["network"] == "not_attempted"
+    assert result["evidence_path"] is None
+    assert "allow_broker_calls=True" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert not target.exists()
+
+
+def test_kis_websocket_smoke_with_evidence_blocks_live_without_live_opt_in(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "kis-websocket-smoke-live.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(profile="live"),
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+        )
+    )
+
+    assert result["status"] == "blocked"
+    assert result["environment"] == "live"
+    assert result["network"] == "not_attempted"
+    assert result["evidence_path"] is None
+    assert "allow_live=True" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert not target.exists()
+
+
+def test_kis_websocket_smoke_with_evidence_rejects_directory_path_before_broker_call(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "kis-websocket-smoke-dir"
+    target.mkdir()
+
+    try:
+        result = asyncio.run(
+            kis.run_websocket_smoke_with_evidence(
+                _cfg(),
+                channel="ccnl_krx",
+                tr_key="005930",
+                evidence_path=target,
+                client=client,
+                transport=transport,
+                allow_broker_calls=True,
+            )
+        )
+    except IsADirectoryError:
+        result = {"status": "raised", "network": "broker_called"}
+
+    assert result["status"] == "invalid_request"
+    assert result["network"] == "not_attempted"
+    assert result["evidence_path"] is None
+    assert result["parameter"] == "evidence_path"
+    assert str(target) in result["requested_value"]
+    assert "file path" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_kis_websocket_smoke_with_evidence_rejects_file_parent_before_broker_call(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    parent = tmp_path / "not-a-directory"
+    parent.write_text("existing file", encoding="utf-8")
+    target = parent / "kis-websocket-smoke.json"
+
+    try:
+        result = asyncio.run(
+            kis.run_websocket_smoke_with_evidence(
+                _cfg(),
+                channel="ccnl_krx",
+                tr_key="005930",
+                evidence_path=target,
+                client=client,
+                transport=transport,
+                allow_broker_calls=True,
+            )
+        )
+    except (FileExistsError, NotADirectoryError):
+        result = {"status": "raised", "network": "broker_called"}
+
+    assert result["status"] == "invalid_request"
+    assert result["network"] == "not_attempted"
+    assert result["evidence_path"] is None
+    assert result["parameter"] == "evidence_path"
+    assert str(target) in result["requested_value"]
+    assert "parent directory" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_kis_websocket_smoke_with_evidence_writes_only_redacted_summary(tmp_path) -> None:
+    client = _KisClient()
+    transport = _KisTransport()
+    target = tmp_path / "nested" / "kis-websocket-smoke.json"
+
+    result = asyncio.run(
+        kis.run_websocket_smoke_with_evidence(
+            _cfg(),
+            channel="ccnl_notice",
+            tr_key="MYHTSID",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=3,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["evidence_path"] == str(target)
+    assert result["subscription"] == {
+        "channel": "ccnl_notice",
+        "tr_id": "H0STCNI9",
+        "tr_key_present": True,
+        "tr_key_kind": "hts_id",
+    }
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload == {key: value for key, value in result.items() if key != "evidence_path"}
+    serialized = json.dumps(result, sort_keys=True)
+    assert "MYHTSID" not in serialized
+    assert "approval-123" not in serialized
+    assert "app-secret" not in serialized
+    assert "raw_values" not in serialized
+    assert client.calls[0]["path"] == "/oauth2/Approval"
+    assert transport.urls == ["ws://ops.koreainvestment.com:31000"]
+
+
 def _kis_notice_values(
     *,
     order_id: str = "0000012345",
@@ -508,6 +1930,35 @@ def test_kis_order_notice_parser_rejects_wrong_or_truncated_frames() -> None:
 
     with pytest.raises(kis.KoreanConnectorConfigError, match="expected 26 values"):
         kis.parse_websocket_order_notices("1|H0STCNI0|001|" + "^".join(_kis_notice_values()[:-1]))
+
+
+def test_kis_decrypts_and_parses_encrypted_order_notice_payload() -> None:
+    key = "0123456789abcdef0123456789abcdef"
+    iv = "abcdef9876543210"
+    cipher_text = (
+        "lt/2OVlwH03tstNbVo8JvqAP7Q1H5VofgPR5/ydyGcdKlJQBvUZ6T4kWyk9po2co"
+        "CEzfjguWetOkVvj+eoPBDZrMWbSaY1zRXr26GyJ9HyYtOR5Sv9PWuFljujIdH6Wg"
+        "SYWsXbWclyTYGhdEbeQila4ZXE9CEs+k3grrpKBqVLE="
+    )
+
+    payload = kis.decrypt_websocket_payload(cipher_text, key=key, iv=iv)
+    assert payload == "^".join(_kis_notice_values())
+
+    notices = kis.parse_websocket_encrypted_order_notices(f"1|H0STCNI9|001|{cipher_text}", key=key, iv=iv)
+
+    assert len(notices) == 1
+    assert notices[0]["order_id"] == "0000012345"
+    assert notices[0]["execution_notice"] is True
+    assert notices[0]["encrypted"] is True
+    assert notices[0]["raw_fields"]["CNTG_ISNM40"] == "20260604"
+
+
+def test_kis_decrypt_rejects_missing_key_or_cleartext_frame() -> None:
+    with pytest.raises(kis.KoreanConnectorConfigError, match="key and iv"):
+        kis.decrypt_websocket_payload("cipher", key="", iv="abcdef9876543210")
+
+    with pytest.raises(kis.KoreanConnectorConfigError, match="encrypted order notice frame"):
+        kis.parse_websocket_encrypted_order_notices("0|H0STCNI9|001|" + "^".join(_kis_notice_values()), key="x", iv="y")
 
 
 def test_kis_quote_requests_token_and_official_quote_endpoint() -> None:

@@ -255,6 +255,57 @@ class TestConnectorLiveDispatch:
             allow_live=True,
         )
 
+    def test_kis_websocket_smoke_routes_to_handler(self, tmp_path: Path) -> None:
+        target = tmp_path / "kis-websocket-smoke.json"
+
+        with patch("cli._legacy.cmd_connector_kis_websocket_smoke", return_value=0) as m:
+            assert self._dispatch(
+                [
+                    "connector",
+                    "kis-websocket-smoke",
+                    "--profile",
+                    "kis-paper-sdk",
+                    "--channel",
+                    "ccnl_krx",
+                    "--tr-key",
+                    "005930",
+                    "--evidence-path",
+                    str(target),
+                    "--max-messages",
+                    "2",
+                    "--message-timeout",
+                    "1.5",
+                    "--connect-attempts",
+                    "2",
+                    "--connect-backoff-seconds",
+                    "0.25",
+                    "--reconnect-attempts",
+                    "1",
+                    "--reconnect-backoff-seconds",
+                    "0.5",
+                    "--max-samples",
+                    "1",
+                    "--allow-broker-calls",
+                    "--allow-live",
+                ]
+            ) == 0
+
+        m.assert_called_once_with(
+            "kis-paper-sdk",
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            max_messages=2,
+            message_timeout=1.5,
+            connect_attempts=2,
+            connect_backoff_seconds=0.25,
+            reconnect_attempts=1,
+            reconnect_backoff_seconds=0.5,
+            max_samples=1,
+            allow_broker_calls=True,
+            allow_live=True,
+        )
+
     def test_kiwoom_websocket_channels_routes_to_handler(self) -> None:
         with patch("cli._legacy.cmd_connector_kiwoom_websocket_channels", return_value=0) as m:
             assert self._dispatch(["connector", "kiwoom-websocket-channels"]) == 0
@@ -278,6 +329,26 @@ class TestConnectorLiveDispatch:
                     "KRX:039490",
                     "--evidence-path",
                     str(tmp_path / "kiwoom-websocket-smoke.json"),
+                ]
+            )
+
+    def test_kis_websocket_smoke_rejects_unknown_channel(self, tmp_path: Path) -> None:
+        from cli._legacy import _build_parser
+
+        parser = _build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                [
+                    "connector",
+                    "kis-websocket-smoke",
+                    "--profile",
+                    "kis-paper-sdk",
+                    "--channel",
+                    "bogus",
+                    "--tr-key",
+                    "005930",
+                    "--evidence-path",
+                    str(tmp_path / "kis-websocket-smoke.json"),
                 ]
             )
 
@@ -528,6 +599,68 @@ class TestKiwoomWebSocketChannelCatalogCli:
         assert payload["network"] == "not_attempted"
         assert payload["count"] == len(KIWOOM_WEBSOCKET_ENDPOINTS)
         assert payload["channels"]["domestic_stock_realtime"]["sample_type"] == "0B"
+
+
+# ---------------------------------------------------------------------------
+# KIS WebSocket smoke CLI wrapper
+# ---------------------------------------------------------------------------
+
+
+class TestKisWebSocketSmokeCli:
+    def test_command_forwards_to_profile_scoped_service(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from cli._legacy import EXIT_SUCCESS, cmd_connector_kis_websocket_smoke
+
+        calls: list[dict[str, Any]] = []
+
+        def fake_smoke_runner(profile_id: str | None, **kwargs: Any) -> dict[str, Any]:
+            calls.append({"profile_id": profile_id, "kwargs": kwargs})
+            return {
+                "status": "not_run",
+                "profile_id": profile_id,
+                "evidence_path": str(kwargs["evidence_path"]),
+            }
+
+        monkeypatch.setattr(
+            "src.trading.service.run_websocket_smoke_with_evidence",
+            fake_smoke_runner,
+        )
+
+        target = tmp_path / "kis-websocket-smoke.json"
+        assert cmd_connector_kis_websocket_smoke(
+            "kis-paper-sdk",
+            channel="ccnl_krx",
+            tr_key="005930",
+            evidence_path=target,
+            max_messages=2,
+            message_timeout=1.5,
+            connect_attempts=2,
+            connect_backoff_seconds=0.25,
+            reconnect_attempts=1,
+            reconnect_backoff_seconds=0.5,
+            max_samples=1,
+        ) == EXIT_SUCCESS
+
+        assert calls == [
+            {
+                "profile_id": "kis-paper-sdk",
+                "kwargs": {
+                    "channel": "ccnl_krx",
+                    "tr_key": "005930",
+                    "evidence_path": target,
+                    "max_messages": 2,
+                    "message_timeout": 1.5,
+                    "connect_attempts": 2,
+                    "connect_backoff_seconds": 0.25,
+                    "reconnect_attempts": 1,
+                    "reconnect_backoff_seconds": 0.5,
+                    "max_samples": 1,
+                    "allow_broker_calls": False,
+                    "allow_live": False,
+                },
+            }
+        ]
 
 
 # ---------------------------------------------------------------------------
