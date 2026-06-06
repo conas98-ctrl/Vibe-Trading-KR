@@ -3327,19 +3327,53 @@ def cmd_connector_configure(
     port: int | None = None,
     client_id: int = 77,
     account: str | None = None,
+    account_product_code: str | None = None,
+    app_key: str | None = None,
+    app_key_env: str | None = None,
+    app_secret: str | None = None,
+    app_secret_env: str | None = None,
+    access_token: str | None = None,
+    access_token_env: str | None = None,
+    base_url: str | None = None,
+    paper_url: str | None = None,
+    live_url: str | None = None,
+    bridge_url: str | None = None,
+    bridge_token: str | None = None,
+    bridge_token_env: str | None = None,
     yes: bool = False,
 ) -> int:
     """Configure a local connector profile."""
-    from src.trading.connectors.ibkr.local import IBKRLocalConfig, config_path, save_config
-
     try:
         profile = _selected_profile_or(profile_id)
     except ValueError as exc:
         console.print(f"[red]{exc}[/red]")
         return EXIT_USAGE_ERROR
+
+    if profile.transport in ("broker_sdk", "local_bridge") and profile.connector in _KOREAN_CONFIG_CONNECTORS:
+        return _cmd_connector_configure_korean(
+            profile,
+            account=account,
+            account_product_code=account_product_code,
+            app_key=app_key,
+            app_key_env=app_key_env,
+            app_secret=app_secret,
+            app_secret_env=app_secret_env,
+            access_token=access_token,
+            access_token_env=access_token_env,
+            base_url=base_url,
+            paper_url=paper_url,
+            live_url=live_url,
+            bridge_url=bridge_url,
+            bridge_token=bridge_token,
+            bridge_token_env=bridge_token_env,
+            yes=yes,
+        )
+
     if profile.transport != "local_tws" or profile.connector != "ibkr":
-        console.print(f"[red]{profile.id} is not a local TWS/Gateway profile.[/red]")
+        console.print(f"[red]{profile.id} is not a configurable local connector profile.[/red]")
         return EXIT_USAGE_ERROR
+
+    from src.trading.connectors.ibkr.local import IBKRLocalConfig, config_path, save_config
 
     path = config_path()
     if path.exists() and not yes:
@@ -3366,6 +3400,151 @@ def cmd_connector_configure(
     console.print(f"[green]Configured[/green] {profile.id} [dim]({path})[/dim]")
     console.print(f"[dim]Run `vibe-trading connector check {profile.id}` to verify it.[/dim]")
     return EXIT_SUCCESS
+
+
+_KOREAN_CONFIG_CONNECTORS = {
+    "kis",
+    "ls",
+    "db",
+    "kiwoom",
+    "kiwoom-openapi",
+    "daishin-cybos",
+    "eugene-champion",
+    "yuanta-tradar",
+    "nh-qv",
+}
+
+
+def _cmd_connector_configure_korean(
+    profile,
+    *,
+    account: str | None,
+    account_product_code: str | None,
+    app_key: str | None,
+    app_key_env: str | None,
+    app_secret: str | None,
+    app_secret_env: str | None,
+    access_token: str | None,
+    access_token_env: str | None,
+    base_url: str | None,
+    paper_url: str | None,
+    live_url: str | None,
+    bridge_url: str | None,
+    bridge_token: str | None,
+    bridge_token_env: str | None,
+    yes: bool,
+) -> int:
+    """Configure Korean direct-SDK or Windows bridge connector credentials."""
+    from src.trading import service
+
+    module = service._sdk_module(profile.connector)
+    path = module.config_path()
+    if path.exists() and not yes:
+        console.print(f"[yellow]Korean connector config already exists:[/yellow] {path}")
+        try:
+            if not Confirm.ask("Overwrite it?", default=False):
+                console.print("[dim]Aborted.[/dim]")
+                return EXIT_SUCCESS
+        except EOFError:
+            console.print("[dim]No input available; use --yes for non-interactive setup.[/dim]")
+            return EXIT_USAGE_ERROR
+
+    try:
+        overrides = _korean_connector_config_overrides(
+            profile=profile,
+            account=account,
+            account_product_code=account_product_code,
+            app_key=app_key,
+            app_key_env=app_key_env,
+            app_secret=app_secret,
+            app_secret_env=app_secret_env,
+            access_token=access_token,
+            access_token_env=access_token_env,
+            base_url=base_url,
+            paper_url=paper_url,
+            live_url=live_url,
+            bridge_url=bridge_url,
+            bridge_token=bridge_token,
+            bridge_token_env=bridge_token_env,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{rich_escape(str(exc))}[/red]")
+        return EXIT_USAGE_ERROR
+
+    cfg = module.build_config(profile.config, overrides)
+    path = module.save_config(cfg)
+    public = cfg.with_overrides(app_key="***" if cfg.app_key else "", app_secret="***" if cfg.app_secret else "")
+    console.print(f"[green]Configured[/green] {profile.id} [dim]({path})[/dim]")
+    console.print(f"[dim]Connector: {profile.connector} · {profile.environment} · {profile.transport}[/dim]")
+    console.print(f"[dim]Endpoint: {public.endpoint}[/dim]")
+    console.print("[dim]Secrets were written to the local config file and are not printed here.[/dim]")
+    console.print(f"[dim]Run `vibe-trading connector check {profile.id}` before credentialed smoke.[/dim]")
+    return EXIT_SUCCESS
+
+
+def _korean_connector_config_overrides(
+    *,
+    profile,
+    account: str | None,
+    account_product_code: str | None,
+    app_key: str | None,
+    app_key_env: str | None,
+    app_secret: str | None,
+    app_secret_env: str | None,
+    access_token: str | None,
+    access_token_env: str | None,
+    base_url: str | None,
+    paper_url: str | None,
+    live_url: str | None,
+    bridge_url: str | None,
+    bridge_token: str | None,
+    bridge_token_env: str | None,
+) -> dict[str, str]:
+    app_key_value = _config_value("app key", value=app_key, env_name=app_key_env)
+    app_secret_value = _config_value("app secret", value=app_secret, env_name=app_secret_env)
+    access_token_value = _config_value("access token", value=access_token, env_name=access_token_env)
+    bridge_token_value = _config_value("bridge token", value=bridge_token, env_name=bridge_token_env)
+    overrides = {
+        "account": account,
+        "account_product_code": account_product_code,
+        "app_key": app_key_value,
+        "app_secret": app_secret_value,
+        "access_token": access_token_value,
+        "base_url": base_url,
+        "paper_url": paper_url,
+        "live_url": live_url,
+        "bridge_url": bridge_url,
+        "bridge_token": bridge_token_value,
+    }
+    clean = {key: str(value).strip() for key, value in overrides.items() if value not in (None, "")}
+    if profile.transport == "local_bridge":
+        if "bridge_token" not in clean:
+            raise ValueError("Korean bridge configuration requires --bridge-token or --bridge-token-env.")
+        return clean
+    missing = []
+    if "app_key" not in clean:
+        missing.append("--app-key or --app-key-env")
+    if "app_secret" not in clean:
+        missing.append("--app-secret or --app-secret-env")
+    if missing:
+        raise ValueError("Korean SDK configuration requires " + " and ".join(missing) + ".")
+    return clean
+
+
+def _config_value(label: str, *, value: str | None, env_name: str | None) -> str:
+    if value and env_name:
+        raise ValueError(f"Pass either --{label.replace(' ', '-')} or --{label.replace(' ', '-')}-env, not both.")
+    if value:
+        return str(value).strip()
+    if env_name:
+        name = str(env_name).strip()
+        if not name:
+            return ""
+        env_value = os.environ.get(name, "")
+        if not env_value:
+            raise ValueError(f"Environment variable {name} is not set for {label}.")
+        return env_value.strip()
+    return ""
 
 
 def cmd_connector_check(
@@ -4152,6 +4331,19 @@ def _dispatch_connector(args: argparse.Namespace) -> int:
             port=args.port,
             client_id=args.client_id,
             account=args.account,
+            account_product_code=args.account_product_code,
+            app_key=args.app_key,
+            app_key_env=args.app_key_env,
+            app_secret=args.app_secret,
+            app_secret_env=args.app_secret_env,
+            access_token=args.access_token,
+            access_token_env=args.access_token_env,
+            base_url=args.base_url,
+            paper_url=args.paper_url,
+            live_url=args.live_url,
+            bridge_url=args.bridge_url,
+            bridge_token=args.bridge_token,
+            bridge_token_env=args.bridge_token_env,
             yes=args.yes,
         )
     if sub == "check":
@@ -4694,6 +4886,19 @@ def _build_parser() -> argparse.ArgumentParser:
     connector_configure.add_argument("--port", type=int, default=None)
     connector_configure.add_argument("--client-id", dest="client_id", type=int, default=77)
     connector_configure.add_argument("--account", default=None)
+    connector_configure.add_argument("--account-product-code", default=None, help="Korean account product code, e.g. KIS 01")
+    connector_configure.add_argument("--app-key", default=None, help="Korean SDK app key; prefer --app-key-env in shells")
+    connector_configure.add_argument("--app-key-env", default=None, help="Environment variable containing the Korean SDK app key")
+    connector_configure.add_argument("--app-secret", default=None, help="Korean SDK app secret; prefer --app-secret-env in shells")
+    connector_configure.add_argument("--app-secret-env", default=None, help="Environment variable containing the Korean SDK app secret")
+    connector_configure.add_argument("--access-token", default=None, help="Optional preissued Korean SDK access token")
+    connector_configure.add_argument("--access-token-env", default=None, help="Environment variable containing a preissued access token")
+    connector_configure.add_argument("--base-url", default=None, help="Override Korean SDK base URL")
+    connector_configure.add_argument("--paper-url", default=None, help="Override Korean SDK paper/mock URL")
+    connector_configure.add_argument("--live-url", default=None, help="Override Korean SDK live URL")
+    connector_configure.add_argument("--bridge-url", default=None, help="Windows local bridge URL")
+    connector_configure.add_argument("--bridge-token", default=None, help="Windows local bridge token; prefer --bridge-token-env in shells")
+    connector_configure.add_argument("--bridge-token-env", default=None, help="Environment variable containing the Windows bridge token")
     connector_configure.add_argument("-y", "--yes", action="store_true", help="Overwrite without prompting")
 
     connector_check = connector_subparsers.add_parser("check", help="Check selected connector readiness")

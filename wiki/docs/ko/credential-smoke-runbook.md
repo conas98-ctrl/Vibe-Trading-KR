@@ -26,6 +26,44 @@ mkdir -p "$KR_SMOKE_DIR"
 chmod 700 "$KR_SMOKE_DIR"
 ```
 
+## 0. 자격증명 설정
+
+브로커별 app secret, access token, bridge token은 명령 출력에 표시하지 않는다. Shell history에 secret 값이 남지 않도록 가능하면 환경변수 이름을 넘긴다. 설정 파일은 `~/.vibe-trading` 아래 connector별 JSON으로 저장되며 `0600` 권한을 사용한다.
+
+KIS/LS/DB/키움 REST SDK profile은 app key와 app secret이 필요하다. 계좌 조회, 잔고, 미체결, 주문 smoke를 실행하려면 계좌번호와 상품코드도 함께 설정한다.
+
+```bash
+export KIS_APP_KEY="..."
+export KIS_APP_SECRET="..."
+
+vibe-trading connector configure kis-paper-sdk \
+  --app-key-env KIS_APP_KEY \
+  --app-secret-env KIS_APP_SECRET \
+  --account "12345678" \
+  --account-product-code "01" \
+  --yes
+```
+
+같은 형식으로 `ls-paper-sdk`, `db-paper-sdk`, `kiwoom-paper-sdk`를 설정한다. live read-only 또는 live trading profile을 설정할 때는 profile id를 `kis-live-sdk-readonly`, `kis-live-trade`처럼 바꾼다. 실계좌 주문 profile은 이 설정만으로 실행되지 않으며, 별도 mandate, kill switch, pre-trade gate가 통과해야 한다.
+
+Windows COM/OCX bridge profile은 bridge URL과 bridge token이 필요하다. bridge process는 Windows PC/VM에서 사용자가 직접 실행하고 로그인한 상태여야 한다.
+
+```bash
+export KIWOOM_BRIDGE_TOKEN="..."
+
+vibe-trading connector configure kiwoom-openapi-live-bridge-readonly \
+  --bridge-url "http://127.0.0.1:8765" \
+  --bridge-token-env KIWOOM_BRIDGE_TOKEN \
+  --yes
+```
+
+대신 CYBOS/CREON Plus는 `daishin-cybos-live-bridge-readonly` profile을 같은 방식으로 설정한다. 설정 뒤에는 broker call을 허용하기 전에 먼저 readiness만 확인한다.
+
+```bash
+vibe-trading connector check kis-paper-sdk
+vibe-trading connector check kiwoom-openapi-live-bridge-readonly
+```
+
 ## 1. 브로커 no-call baseline
 
 먼저 자격증명 없이 plan-only evidence를 만든다. 이 단계의 목적은 명령 wiring과 redaction을 확인하는 것이며, 실호출 증거가 아니다.
