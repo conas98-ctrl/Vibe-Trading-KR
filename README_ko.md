@@ -6,10 +6,12 @@
   <img src="assets/icon.png" width="120" alt="Vibe-Trading 로고"/>
 </p>
 
-<h1 align="center">Vibe-Trading: 당신의 개인 트레이딩 에이전트</h1>
+<h1 align="center">Vibe-Trading-KR: 한국 시장을 위한 개인 트레이딩 에이전트</h1>
 
 <p align="center">
   <b>한 번의 명령으로 에이전트에 종합적인 트레이딩 역량을 더하세요</b>
+  <br>
+  🇰🇷 <b><a href="https://github.com/HKUDS/Vibe-Trading">Vibe-Trading</a>의 한국 시장 포크</b> — 원본 에이전트 위에 한국 증권사 커넥터(KIS · LS · DB · 키움)와 KRX 백테스트를 추가했습니다
 </p>
 
 <p align="center">
@@ -18,6 +20,8 @@
   <img src="https://img.shields.io/badge/Frontend-React%2019-61DAFB?style=flat&logo=react&logoColor=white" alt="React">
   <a href="https://pypi.org/project/vibe-trading-ai/"><img src="https://img.shields.io/pypi/v/vibe-trading-ai?style=flat&logo=pypi&logoColor=white" alt="PyPI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat" alt="License"></a>
+  <img src="https://img.shields.io/badge/Market-%F0%9F%87%B0%F0%9F%87%B7%20KRX-CD2E3A?style=flat" alt="Korean Market">
+  <a href="https://github.com/HKUDS/Vibe-Trading"><img src="https://img.shields.io/badge/fork%20of-HKUDS%2FVibe--Trading-181717?style=flat&logo=github&logoColor=white" alt="Upstream"></a>
   <br>
   <a href="https://github.com/HKUDS/.github/blob/main/profile/README.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat-square&logo=feishu&logoColor=white" alt="Feishu"></a>
   <a href="https://github.com/HKUDS/.github/blob/main/profile/README.md"><img src="https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat-square&logo=wechat&logoColor=white" alt="WeChat"></a>
@@ -28,6 +32,7 @@
   <a href="https://vibetrading.wiki/">웹사이트</a> &nbsp;&middot;&nbsp;
   <a href="https://vibetrading.wiki/docs/">문서</a> &nbsp;&middot;&nbsp;
   <a href="#-뉴스">뉴스</a> &nbsp;&middot;&nbsp;
+  <a href="#-한국-시장-지원">🇰🇷 한국 시장</a> &nbsp;&middot;&nbsp;
   <a href="#-주요-기능">기능</a> &nbsp;&middot;&nbsp;
   <a href="#-섀도우-계정">섀도우 계정</a> &nbsp;&middot;&nbsp;
   <a href="#-데모">데모</a> &nbsp;&middot;&nbsp;
@@ -41,6 +46,59 @@
 <p align="center">
   <a href="#-빠른-시작"><img src="assets/pip-install.svg" height="45" alt="pip install vibe-trading-ai"></a>
 </p>
+
+---
+
+> [!NOTE]
+> **이 저장소는 [HKUDS/Vibe-Trading](https://github.com/HKUDS/Vibe-Trading)의 포크입니다.**
+> 원본 에이전트(리서치 목표, swarm, 백테스트, 섀도우 계정, CLI/REST/MCP/Web)를 그대로 유지하면서,
+> **한국 증권/투자 API** — 한국 증권사 커넥터와 KRX 시장 라우팅 — 를 추가했습니다.
+> 한국 시장과 무관한 코어 개념·기능은 원본 README가 기준입니다.
+
+## 🇰🇷 한국 시장 지원
+
+이 포크는 Vibe-Trading 위에 한국 시장 지원을 추가합니다. 구현 상태는 보수적으로 표기합니다 — 자격증명 기반
+smoke evidence가 확보된 뒤에만 실연동 완료로 표시합니다. 전체 감사 내용은
+[한국 브로커 API 매트릭스](wiki/docs/ko/broker-api-matrix.md)와
+[한국시장 자격증명 smoke 검증 Runbook](wiki/docs/ko/credential-smoke-runbook.md)을 참고하세요.
+
+**상태 기준** — `registry`: 커넥터 profile·transport·mandate 분류·fail-closed config 등록 ·
+`contract`: 공식 샘플/문서 기준 요청/응답 매핑 테스트 · `paper-smoke`: 모의/테스트 계정으로 계좌·시세·주문 실행 ·
+`live-gated`: 실계좌 주문 경로는 mandate·kill switch·사전 거래 체크·audit ledger 뒤에서만 열림 ·
+`blocked`: 자격증명·OS 실행면·라이선스·문서 접근 때문에 검증이 아직 닫히지 않음.
+
+### 지원 브로커
+
+| 브로커 | 공식 표면 | 커넥터 | Transport | 상태 |
+|---|---|---|---|---|
+| 한국투자증권 (KIS) | [KIS Developers](https://apiportal.koreainvestment.com/apiservice-category) | `kis-*` | `broker_sdk` | `registry`, `contract` (국내주식 REST + WebSocket) |
+| LS증권 | [LS OpenAPI](https://openapi.ls-sec.co.kr/apiservice) | `ls-*` | `broker_sdk` | `registry`, `contract` (token / t1101 / t0424 / CSPAT 주문 REST) |
+| DB증권 | [DB증권 OPEN API](https://openapi.dbsec.co.kr/) | `db-*` | `broker_sdk` | `registry`, `contract` (REST + S00/S01/IS0/IS1 WebSocket) |
+| 키움증권 REST | [Kiwoom REST OpenAPI](https://openapi.kiwoom.com/guide/apiguide) | `kiwoom-*` | `broker_sdk` | `registry`, `contract` (ka10001/ka10081/kt00018/ka10075/kt 주문 REST) |
+| 키움증권 OpenAPI+ | [Kiwoom OpenAPI 포털](https://openapi.kiwoom.com/guide/apiguide) | `kiwoom-openapi-*` | `local_bridge` (Windows) | `registry`, `contract`, `blocked` (Windows smoke) |
+| 대신증권 CYBOS/CREON Plus | [Daishin CYBOS Plus](https://money2.daishin.com/E5/WTS/Customer/GuideTrading/DW_CybosPlus.aspx) | `daishin-cybos-*` | `local_bridge` (Windows) | `registry`, `contract`, `blocked` (Windows smoke) |
+
+> 대부분의 브로커는 `contract` 단계입니다. **실계좌 주문 실연동은 아직 smoke로 검증되지 않았으며**, 브로커별
+> 자격증명과 mandate·kill switch·사전 거래 체크·audit ledger 뒤에 둡니다. 토스·유진·유안타·NH/QV·신한·미래에셋 등은
+> 매트릭스에 감사 후보로 기록돼 있으며 완료된 커넥터가 아닙니다.
+
+### KRX 백테스트 / 데이터
+
+- **시장 라우팅** — `005930.KS`, `035720.KQ`, `KRX:005930`, `KR.005930`은 `source="auto"`에서 `kr_equity`로 라우팅됩니다.
+- **데이터 로더** — `kr_equity` fallback chain은 `yfinance` → `akshare` (공식 KRX / 코스콤 API loader는 라이선스·인증키 게이트로 `blocked`).
+- **엔진 규칙** — `GlobalEquityEngine(market="kr")`는 KRX 1주 거래단위와 일일 ±30% 가격제한을 모델링하며, 기본 long-only (`kr_allow_short`로 예외 허용).
+- **비용** — 수수료/거래세는 단정하지 않고 `kr_commission`, `kr_transaction_tax`, `slippage_kr`로 명시 입력합니다. benchmark는 KOSPI `^KS11`로 해석됩니다.
+
+### 한국 자격증명
+
+브로커 키는 환경변수에서 읽으며(저장소에 커밋하지 않음), connector별 설정은 `~/.vibe-trading` 아래 `0600` 권한으로 저장됩니다.
+
+```bash
+export KIS_APP_KEY="..."
+export KIS_APP_SECRET="..."
+# KIS/LS/DB/키움 REST는 잔고·주문 smoke에 계좌번호 + 상품코드도 필요합니다.
+# Windows 브리지 브로커(키움 OpenAPI+, 대신 CYBOS)는 localhost bridge token을 사용합니다(예: KIWOOM_BRIDGE_TOKEN).
+```
 
 ---
 
@@ -341,7 +399,21 @@ https://github.com/user-attachments/assets/3754a414-c3ee-464f-b1e8-78e1a74fbd30
 
 ## 🚀 빠른 시작
 
-### 한 줄 설치 (PyPI)
+### 설치
+
+> **어떤 설치가 필요한가요?** [`vibe-trading-ai` PyPI 패키지](https://pypi.org/project/vibe-trading-ai/)는 **원본(upstream) 코어**만
+> 배포합니다. 이 포크의 한국 증권사 커넥터(KIS · LS · DB · 키움)와 KRX 문서는 **PyPI에 게시되어 있지 않습니다** — 사용하려면
+> 이 저장소를 소스에서 설치하세요.
+
+**권장 — 한국 포크(소스 설치):**
+
+```bash
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
+pip install -e .
+```
+
+**원본 코어만 (PyPI, KR 커넥터 없음):**
 
 ```bash
 pip install vibe-trading-ai
@@ -392,8 +464,8 @@ vibe-trading-mcp               # start MCP server (stdio)
 ### 경로 A: Docker (설정 불필요)
 
 ```bash
-git clone https://github.com/HKUDS/Vibe-Trading.git
-cd Vibe-Trading
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
 cp agent/.env.example agent/.env
 # Edit agent/.env — uncomment your LLM provider and set API key
 docker compose up --build
@@ -406,8 +478,8 @@ Docker는 기본적으로 backend를 `127.0.0.1:8899`에 게시하고 앱을 non
 ### 경로 B: Local install
 
 ```bash
-git clone https://github.com/HKUDS/Vibe-Trading.git
-cd Vibe-Trading
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
 python -m venv .venv
 
 # Activate

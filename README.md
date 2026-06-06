@@ -6,10 +6,12 @@
   <img src="assets/icon.png" width="120" alt="Vibe-Trading Logo"/>
 </p>
 
-<h1 align="center">Vibe-Trading: Your Personal Trading Agent</h1>
+<h1 align="center">Vibe-Trading-KR: Your Personal Trading Agent for the Korean Market</h1>
 
 <p align="center">
   <b>One Command to Empower Your Agent with Comprehensive Trading Capabilities</b>
+  <br>
+  🇰🇷 <b>The Korean-market fork of <a href="https://github.com/HKUDS/Vibe-Trading">Vibe-Trading</a></b> — Korean broker connectors (KIS · LS · DB · Kiwoom) and KRX backtesting on top of the full upstream agent
 </p>
 
 <p align="center">
@@ -18,6 +20,8 @@
   <img src="https://img.shields.io/badge/Frontend-React%2019-61DAFB?style=flat&logo=react&logoColor=white" alt="React">
   <a href="https://pypi.org/project/vibe-trading-ai/"><img src="https://img.shields.io/pypi/v/vibe-trading-ai?style=flat&logo=pypi&logoColor=white" alt="PyPI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow?style=flat" alt="License"></a>
+  <img src="https://img.shields.io/badge/Market-%F0%9F%87%B0%F0%9F%87%B7%20KRX-CD2E3A?style=flat" alt="Korean Market">
+  <a href="https://github.com/HKUDS/Vibe-Trading"><img src="https://img.shields.io/badge/fork%20of-HKUDS%2FVibe--Trading-181717?style=flat&logo=github&logoColor=white" alt="Upstream"></a>
   <br>
   <a href="https://github.com/HKUDS/.github/blob/main/profile/README.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat-square&logo=feishu&logoColor=white" alt="Feishu"></a>
   <a href="https://github.com/HKUDS/.github/blob/main/profile/README.md"><img src="https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat-square&logo=wechat&logoColor=white" alt="WeChat"></a>
@@ -28,6 +32,7 @@
   <a href="https://vibetrading.wiki/">Website</a> &nbsp;&middot;&nbsp;
   <a href="https://vibetrading.wiki/docs/">Docs</a> &nbsp;&middot;&nbsp;
   <a href="#-news">News</a> &nbsp;&middot;&nbsp;
+  <a href="#-korean-market-support">🇰🇷 Korean Market</a> &nbsp;&middot;&nbsp;
   <a href="#-key-features">Features</a> &nbsp;&middot;&nbsp;
   <a href="#-shadow-account">Shadow Account</a> &nbsp;&middot;&nbsp;
   <a href="#-demo">Demo</a> &nbsp;&middot;&nbsp;
@@ -41,6 +46,60 @@
 <p align="center">
   <a href="#-quick-start"><img src="assets/pip-install.svg" height="45" alt="pip install vibe-trading-ai"></a>
 </p>
+
+---
+
+> [!NOTE]
+> **This repository is a fork of [HKUDS/Vibe-Trading](https://github.com/HKUDS/Vibe-Trading).**
+> It keeps the full upstream agent (research goals, swarms, backtesting, Shadow Account, CLI/REST/MCP/Web)
+> and adds **Korean securities/investment APIs** — broker connectors and KRX market routing for the Korean market.
+> For core concepts and features that are not Korea-specific, the upstream README is the source of truth.
+
+## 🇰🇷 Korean Market Support
+
+This fork adds first-class support for the Korean market on top of Vibe-Trading. Implementation status is
+tracked conservatively: a broker is only marked *live* after credentialed smoke evidence is captured. See the
+[Korean broker API matrix](wiki/docs/ko/broker-api-matrix.md) and the
+[Korean credential smoke runbook](wiki/docs/ko/credential-smoke-runbook.md) for the full audit.
+
+**Status legend** — `registry`: connector profile, transport, mandate classification, fail-closed config registered ·
+`contract`: request/response mapping tests against official samples/docs · `paper-smoke`: account/quote/order verified
+on a mock/test account · `live-gated`: real-account order path opens only behind mandate, kill switch, pre-trade checks
+and an audit ledger · `blocked`: verification not yet closed (credentials, OS surface, license, or docs access).
+
+### Supported brokers
+
+| Broker | Official surface | Connector | Transport | Status |
+|---|---|---|---|---|
+| 한국투자증권 (KIS) | [KIS Developers](https://apiportal.koreainvestment.com/apiservice-category) | `kis-*` | `broker_sdk` | `registry`, `contract` (domestic-stock REST + WebSocket) |
+| LS증권 | [LS OpenAPI](https://openapi.ls-sec.co.kr/apiservice) | `ls-*` | `broker_sdk` | `registry`, `contract` (token / t1101 / t0424 / CSPAT order REST) |
+| DB증권 | [DB증권 OPEN API](https://openapi.dbsec.co.kr/) | `db-*` | `broker_sdk` | `registry`, `contract` (REST + S00/S01/IS0/IS1 WebSocket) |
+| 키움증권 REST | [Kiwoom REST OpenAPI](https://openapi.kiwoom.com/guide/apiguide) | `kiwoom-*` | `broker_sdk` | `registry`, `contract` (ka10001/ka10081/kt00018/ka10075/kt order REST) |
+| 키움증권 OpenAPI+ | [Kiwoom OpenAPI portal](https://openapi.kiwoom.com/guide/apiguide) | `kiwoom-openapi-*` | `local_bridge` (Windows) | `registry`, `contract`, `blocked` (Windows smoke) |
+| 대신증권 CYBOS/CREON Plus | [Daishin CYBOS Plus](https://money2.daishin.com/E5/WTS/Customer/GuideTrading/DW_CybosPlus.aspx) | `daishin-cybos-*` | `local_bridge` (Windows) | `registry`, `contract`, `blocked` (Windows smoke) |
+
+> Most brokers are at the `contract` stage. **Real-account order execution is not yet smoke-proven** and stays behind
+> per-broker credentials plus mandate, kill switch, pre-trade checks and an audit ledger. Toss, Eugene, Yuanta, NH/QV,
+> Shinhan, Mirae Asset and others are tracked as audit candidates in the matrix, not as completed connectors.
+
+### KRX backtesting & data
+
+- **Market routing** — `005930.KS`, `035720.KQ`, `KRX:005930`, `KR.005930` route to `kr_equity` under `source="auto"`.
+- **Data loaders** — `kr_equity` fallback chain is `yfinance` → `akshare` (official KRX / KOSCOM API loaders are `blocked` pending license/keys).
+- **Engine rules** — `GlobalEquityEngine(market="kr")` models the KRX 1-share lot and ±30% daily price limit; long-only by default (`kr_allow_short` to opt in).
+- **Costs** — commission/transaction-tax are not assumed; set `kr_commission`, `kr_transaction_tax`, `slippage_kr` explicitly. Benchmark resolves to KOSPI `^KS11`.
+
+### Korean credentials
+
+Broker keys are read from environment variables (never committed). Per-connector config is stored under
+`~/.vibe-trading` with `0600` permissions.
+
+```bash
+export KIS_APP_KEY="..."
+export KIS_APP_SECRET="..."
+# KIS/LS/DB/Kiwoom REST also need account number + product code for balance/order smoke.
+# Windows-bridge brokers (Kiwoom OpenAPI+, Daishin CYBOS) use a localhost bridge token, e.g. KIWOOM_BRIDGE_TOKEN.
+```
 
 ---
 
@@ -325,7 +384,21 @@ https://github.com/user-attachments/assets/3754a414-c3ee-464f-b1e8-78e1a74fbd30
 
 ## 🚀 Quick Start
 
-### One-line install (PyPI)
+### Install
+
+> **Which install do you want?** The [`vibe-trading-ai` PyPI package](https://pypi.org/project/vibe-trading-ai/) ships the
+> **upstream core** only. The Korean broker connectors (KIS · LS · DB · Kiwoom) and the KRX docs in this fork are **not
+> published to PyPI** — to get them, install this repo from source.
+
+**Recommended — Korean fork (from source):**
+
+```bash
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
+pip install -e .
+```
+
+**Upstream core only (PyPI, no KR connectors):**
 
 ```bash
 pip install vibe-trading-ai
@@ -376,8 +449,8 @@ vibe-trading-mcp               # start MCP server (stdio)
 ### Path A: Docker (zero setup)
 
 ```bash
-git clone https://github.com/HKUDS/Vibe-Trading.git
-cd Vibe-Trading
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
 cp agent/.env.example agent/.env
 # Edit agent/.env — uncomment your LLM provider and set API key
 docker compose up --build
@@ -390,8 +463,8 @@ Docker publishes the backend on `127.0.0.1:8899` by default and runs the app as 
 ### Path B: Local install
 
 ```bash
-git clone https://github.com/HKUDS/Vibe-Trading.git
-cd Vibe-Trading
+git clone https://github.com/pinehill99/Vibe-Trading-KR.git
+cd Vibe-Trading-KR
 python -m venv .venv
 
 # Activate
