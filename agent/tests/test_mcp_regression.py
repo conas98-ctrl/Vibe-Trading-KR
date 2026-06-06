@@ -24,8 +24,10 @@ IMPORTANT notes:
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -174,6 +176,7 @@ def test_mcp_server_exposes_well_known_tool_names() -> None:
         "trading_orders",
         "trading_quote",
         "trading_history",
+        "trading_kiwoom_websocket_smoke",
     }
     missing = expected - registered
     assert not missing, (
@@ -191,6 +194,32 @@ class _RecordingRegistry:
     def execute(self, name: str, payload: dict[str, Any]) -> str:
         self.calls.append((name, payload))
         return "{}"
+
+
+class _FakeFastMCP:
+    """Tiny FastMCP stub for wrapper-only tests in minimal local envs."""
+
+    def __init__(self, *_: Any, **__: Any) -> None:
+        self.registered: list[str] = []
+
+    def tool(self, func):
+        self.registered.append(func.__name__)
+        return func
+
+
+def _import_mcp_server_with_fake_fastmcp(monkeypatch: pytest.MonkeyPatch):
+    previous = sys.modules.pop("mcp_server", None)
+    monkeypatch.setitem(
+        sys.modules,
+        "fastmcp",
+        SimpleNamespace(Context=object, FastMCP=_FakeFastMCP),
+    )
+    try:
+        return _import_mcp_server()
+    finally:
+        sys.modules.pop("mcp_server", None)
+        if previous is not None:
+            sys.modules["mcp_server"] = previous
 
 
 def test_trading_mcp_wrappers_do_not_send_implicit_local_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -240,3 +269,72 @@ def test_trading_mcp_wrappers_forward_explicit_local_overrides(monkeypatch: pyte
         ),
         ("trading_check", {"account": "DU12345"}),
     ]
+
+
+def test_trading_kiwoom_websocket_smoke_mcp_wrapper_forwards_safety_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kiwoom WebSocket smoke MCP calls should preserve explicit safety flags."""
+    mod = _import_mcp_server_with_fake_fastmcp(monkeypatch)
+    registry = _RecordingRegistry()
+    monkeypatch.setattr(mod, "_get_registry", lambda: registry)
+
+    mod.trading_kiwoom_websocket_smoke(
+        channel="domestic_stock_realtime",
+        symbols=["KRX:039490"],
+        evidence_path="/tmp/kiwoom-websocket-smoke.json",
+        connection="kiwoom-paper-sdk",
+        max_messages=2,
+        message_timeout=1.5,
+        connect_attempts=3,
+        connect_backoff_seconds=0.25,
+        reconnect_attempts=1,
+        reconnect_backoff_seconds=0.5,
+        max_samples=1,
+        allow_broker_calls=False,
+        allow_live=False,
+    )
+
+    assert registry.calls == [
+        (
+            "trading_kiwoom_websocket_smoke",
+            {
+                "connection": "kiwoom-paper-sdk",
+                "channel": "domestic_stock_realtime",
+                "symbols": ["KRX:039490"],
+                "evidence_path": "/tmp/kiwoom-websocket-smoke.json",
+                "max_messages": 2,
+                "message_timeout": 1.5,
+                "connect_attempts": 3,
+                "connect_backoff_seconds": 0.25,
+                "reconnect_attempts": 1,
+                "reconnect_backoff_seconds": 0.5,
+                "max_samples": 1,
+                "allow_broker_calls": False,
+                "allow_live": False,
+            },
+        )
+    ]
+
+
+def test_trading_kiwoom_websocket_smoke_mcp_wrapper_rejects_unknown_channel_before_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown Kiwoom WebSocket channels should not reach the backend registry."""
+    mod = _import_mcp_server_with_fake_fastmcp(monkeypatch)
+    registry = _RecordingRegistry()
+    monkeypatch.setattr(mod, "_get_registry", lambda: registry)
+
+    result = json.loads(
+        mod.trading_kiwoom_websocket_smoke(
+            channel="bogus",
+            symbols=["KRX:039490"],
+            evidence_path="/tmp/kiwoom-websocket-smoke.json",
+            connection="kiwoom-paper-sdk",
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "unsupported Kiwoom WebSocket channel" in result["error"]
+    assert "domestic_stock_realtime" in result["supported_channels"]
+    assert registry.calls == []

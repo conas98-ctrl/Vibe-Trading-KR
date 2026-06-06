@@ -685,6 +685,8 @@ Settings read는 side effect가 없습니다. `GET /settings/llm`과 `GET /setti
 
 Vibe-Trading은 모든 MCP-compatible client를 위해 36개 MCP tools를 제공합니다. stdio subprocess로 실행되므로 server setup이 필요 없습니다. 핵심 research tools는 HK/US/crypto에서 API key 없이 작동하고, trading connector tools는 선택된 connector profile을 사용하며, `run_swarm`만 LLM key가 필요합니다.
 
+Kiwoom 국내주식 REST WebSocket smoke를 실행하거나 credentialed evidence를 남길 때는 [Kiwoom WebSocket Smoke Runbook](https://vibetrading.wiki/docs/latest/tools/kiwoom-websocket-smoke-runbook)을 먼저 확인하세요. 기본값은 broker call을 하지 않으며, 실제 Kiwoom REST OpenAPI WebSocket 호출은 `--allow-broker-calls`와 실전 profile의 `--allow-live`로 명시적으로 열립니다.
+
 <details>
 <summary><b>Claude Desktop</b></summary>
 

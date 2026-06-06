@@ -7,12 +7,15 @@ fail-closed until its official request/response surface is pinned by tests.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from datetime import date
+import json
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
 from src.config.paths import get_runtime_root
+from src.tools.redaction import redact_payload
 from src.trading.connectors.kr_common import (
     KoreanConnectorConfig,
     KoreanConnectorConfigError,
@@ -750,6 +753,649 @@ def parse_websocket_best_quotes(message: Mapping[str, Any]) -> list[dict[str, An
             }
         )
     return quotes
+class KiwoomWebSocketConnection:
+    """Small adapter around a real Kiwoom WebSocket client connection."""
+
+    def __init__(self, socket: Any, manager: Any | None = None):
+        self._socket = socket
+        self._manager = manager
+
+    async def send_json(self, payload: Mapping[str, Any]) -> None:
+        await self._socket.send(json.dumps(dict(payload), ensure_ascii=False))
+
+    async def receive_json(self) -> dict[str, Any]:
+        payload = await self._socket.recv()
+        try:
+            if isinstance(payload, bytes):
+                payload = payload.decode("utf-8")
+            data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError, UnicodeDecodeError, ValueError) as exc:
+            return {"type": "error", "status": "error", "error": str(exc) or exc.__class__.__name__}
+        if not isinstance(data, Mapping):
+            return {"type": "error", "status": "error", "error": "Kiwoom WebSocket frame must be a JSON object."}
+        return dict(data or {})
+
+    async def close(self) -> None:
+        if self._manager is not None:
+            await self._manager.__aexit__(None, None, None)
+            return
+        await self._socket.close()
+
+
+class KiwoomWebSocketTransport:
+    """Connect to Kiwoom's official WebSocket endpoint using ``websockets``."""
+
+    def __init__(self, connect_factory: Any | None = None):
+        self._connect_factory = connect_factory or _websockets_connect
+
+    async def connect(self, url: str) -> KiwoomWebSocketConnection:
+        connection = self._connect_factory(url)
+        if hasattr(connection, "__await__"):
+            return KiwoomWebSocketConnection(await connection)
+        if hasattr(connection, "__aenter__"):
+            return KiwoomWebSocketConnection(await connection.__aenter__(), manager=connection)
+        return KiwoomWebSocketConnection(connection)
+
+
+def create_websocket_transport() -> KiwoomWebSocketTransport:
+    """Return the default Kiwoom WebSocket transport."""
+
+    return KiwoomWebSocketTransport()
+
+
+async def run_websocket_smoke(
+    config: KoreanConnectorConfig | None = None,
+    *,
+    channel: str = "domestic_stock_realtime",
+    symbols: list[str] | tuple[str, ...],
+    transport: Any | None = None,
+    max_messages: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+) -> dict[str, Any]:
+    cfg = config or load_config()
+    injected_transport = transport is not None
+    if not cfg.access_token:
+        return {
+            "status": "not_configured",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "missing": ["access_token"],
+            "network": "not_attempted",
+        }
+    try:
+        message_target = int(max_messages)
+    except (TypeError, ValueError):
+        message_target = 0
+    if message_target < 1:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "max_messages",
+            "requested_value": max_messages,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "Kiwoom WebSocket smoke max_messages must be a positive integer.",
+        }
+    timeout_seconds: float | None = None
+    if message_timeout is not None:
+        try:
+            timeout_seconds = float(message_timeout)
+        except (TypeError, ValueError):
+            timeout_seconds = 0.0
+        if timeout_seconds <= 0:
+            return {
+                "status": "invalid_request",
+                "connector": CONNECTOR,
+                "profile": cfg.profile,
+                "environment": cfg.environment,
+                "network": "not_attempted",
+                "parameter": "message_timeout",
+                "requested_value": message_timeout,
+                "received_frames": 0,
+                "sample_payloads": [],
+                "subscription_events": [],
+                "frame_errors": [],
+                "reason": "Kiwoom WebSocket smoke message_timeout must be a positive number.",
+            }
+    try:
+        connect_attempt_count = int(connect_attempts)
+    except (TypeError, ValueError):
+        connect_attempt_count = 0
+    if connect_attempt_count < 1:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "connect_attempts",
+            "requested_value": connect_attempts,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "Kiwoom WebSocket smoke connect_attempts must be a positive integer.",
+        }
+    try:
+        reconnect_budget = int(reconnect_attempts)
+    except (TypeError, ValueError):
+        reconnect_budget = -1
+    if reconnect_budget < 0:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "reconnect_attempts",
+            "requested_value": reconnect_attempts,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "Kiwoom WebSocket smoke reconnect_attempts must be a non-negative integer.",
+        }
+    try:
+        connect_backoff = float(connect_backoff_seconds)
+    except (TypeError, ValueError):
+        connect_backoff = -1.0
+    if connect_backoff < 0:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "connect_backoff_seconds",
+            "requested_value": connect_backoff_seconds,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "Kiwoom WebSocket smoke connect_backoff_seconds must be a non-negative number.",
+        }
+    try:
+        reconnect_backoff = float(reconnect_backoff_seconds)
+    except (TypeError, ValueError):
+        reconnect_backoff = -1.0
+    if reconnect_backoff < 0:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "reconnect_backoff_seconds",
+            "requested_value": reconnect_backoff_seconds,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "Kiwoom WebSocket smoke reconnect_backoff_seconds must be a non-negative number.",
+        }
+    try:
+        subscribe_frame = build_websocket_subscribe_frame(symbols, channel=channel)
+    except KoreanConnectorConfigError as exc:
+        parameter = "channel" if str(channel or "").strip() not in KIWOOM_WEBSOCKET_ENDPOINTS else "symbols"
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": parameter,
+            "requested_value": (
+                channel
+                if parameter == "channel"
+                else list(symbols) if isinstance(symbols, (list, tuple)) else symbols
+            ),
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": str(exc),
+        }
+    if transport is None:
+        try:
+            transport = create_websocket_transport()
+        except KoreanConnectorConfigError as exc:
+            return {
+                "status": "not_configured",
+                "connector": CONNECTOR,
+                "profile": cfg.profile,
+                "missing": ["websockets"],
+                "network": "not_attempted",
+                "error": str(exc),
+            }
+
+    endpoint = KIWOOM_WEBSOCKET_ENDPOINTS[channel]
+    login_frame = build_websocket_login_frame(cfg.access_token)
+    socket, connection_attempts, connect_error = await _connect_websocket_with_retries(
+        transport,
+        endpoint["url"],
+        connect_attempts=connect_attempt_count,
+        connect_backoff_seconds=connect_backoff,
+    )
+    total_connection_attempts = connection_attempts
+    reconnects = 0
+    if socket is None:
+        data = subscribe_frame["data"][0]
+        return {
+            "status": "connection_error",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "network": "injected_transport" if injected_transport else "websocket_transport",
+            "uri": endpoint["url"],
+            "login": "not_attempted",
+            "subscription": {"items": list(data["item"]), "types": list(data["type"])},
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "connection_attempts": total_connection_attempts,
+            "reconnects": reconnects,
+            "reason": f"Kiwoom WebSocket transport failed to connect after {connection_attempts} attempt(s): {connect_error}",
+        }
+    sample_payloads: list[dict[str, Any]] = []
+    subscription_events: list[dict[str, Any]] = []
+    frame_errors: list[dict[str, Any]] = []
+    received_frames = 0
+    try:
+        await socket.send_json(login_frame)
+        await socket.send_json(subscribe_frame)
+        while received_frames < message_target:
+            try:
+                message = await _receive_websocket_message(socket, message_timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                data = subscribe_frame["data"][0]
+                return {
+                    "status": "timeout",
+                    "connector": CONNECTOR,
+                    "profile": cfg.profile,
+                    "network": "injected_transport" if injected_transport else "websocket_transport",
+                    "uri": endpoint["url"],
+                    "login": "ok",
+                    "subscription": {"items": list(data["item"]), "types": list(data["type"])},
+                    "received_frames": received_frames,
+                    "sample_payloads": sample_payloads,
+                    "subscription_events": subscription_events,
+                    "frame_errors": frame_errors,
+                    "connection_attempts": total_connection_attempts,
+                    "reconnects": reconnects,
+                    "timeout_seconds": timeout_seconds,
+                    "reason": "Kiwoom WebSocket smoke exceeded message_timeout while waiting for a frame.",
+                }
+            except Exception as exc:
+                data = subscribe_frame["data"][0]
+                if reconnects >= reconnect_budget:
+                    return {
+                        "status": "connection_error",
+                        "connector": CONNECTOR,
+                        "profile": cfg.profile,
+                        "network": "injected_transport" if injected_transport else "websocket_transport",
+                        "uri": endpoint["url"],
+                        "login": "ok",
+                        "subscription": {"items": list(data["item"]), "types": list(data["type"])},
+                        "received_frames": received_frames,
+                        "sample_payloads": sample_payloads,
+                        "subscription_events": subscription_events,
+                        "frame_errors": frame_errors,
+                        "connection_attempts": total_connection_attempts,
+                        "reconnects": reconnects,
+                        "reason": (
+                            "Kiwoom WebSocket transport disconnected while receiving a frame: "
+                            f"{str(exc) or exc.__class__.__name__}"
+                        ),
+                    }
+                await socket.close()
+                socket = None
+                if reconnect_backoff:
+                    await asyncio.sleep(reconnect_backoff)
+                next_socket, reconnect_connection_attempts, reconnect_error = await _connect_websocket_with_retries(
+                    transport,
+                    endpoint["url"],
+                    connect_attempts=connect_attempt_count,
+                    connect_backoff_seconds=connect_backoff,
+                )
+                total_connection_attempts += reconnect_connection_attempts
+                reconnects += 1
+                if next_socket is None:
+                    return {
+                        "status": "connection_error",
+                        "connector": CONNECTOR,
+                        "profile": cfg.profile,
+                        "network": "injected_transport" if injected_transport else "websocket_transport",
+                        "uri": endpoint["url"],
+                        "login": "ok",
+                        "subscription": {"items": list(data["item"]), "types": list(data["type"])},
+                        "received_frames": received_frames,
+                        "sample_payloads": sample_payloads,
+                        "subscription_events": subscription_events,
+                        "frame_errors": frame_errors,
+                        "connection_attempts": total_connection_attempts,
+                        "reconnects": reconnects,
+                        "reason": (
+                            "Kiwoom WebSocket transport failed to reconnect after "
+                            f"{reconnect_connection_attempts} attempt(s): {reconnect_error}"
+                        ),
+                    }
+                socket = next_socket
+                await socket.send_json(login_frame)
+                await socket.send_json(subscribe_frame)
+                continue
+            received_frames += 1
+            if _is_websocket_frame_error(message):
+                frame_error = _websocket_frame_error(message)
+                frame_errors.append(frame_error)
+                data = subscribe_frame["data"][0]
+                return {
+                    "status": "frame_error",
+                    "connector": CONNECTOR,
+                    "profile": cfg.profile,
+                    "network": "injected_transport" if injected_transport else "websocket_transport",
+                    "uri": endpoint["url"],
+                    "login": "ok",
+                    "subscription": {"items": list(data["item"]), "types": list(data["type"])},
+                    "received_frames": received_frames,
+                    "sample_payloads": sample_payloads,
+                    "subscription_events": subscription_events,
+                    "frame_errors": frame_errors,
+                    "connection_attempts": total_connection_attempts,
+                    "reconnects": reconnects,
+                    "reason": f"Kiwoom WebSocket smoke received an invalid frame: {frame_error.get('error')}",
+                }
+            reply = websocket_control_reply(message)
+            if reply is not None:
+                await socket.send_json(reply)
+                continue
+            if str(message.get("trnm") or "").strip().upper() == endpoint["login_trnm"]:
+                continue
+            if str(message.get("trnm") or "").strip().upper() == endpoint["subscribe_trnm"]:
+                subscription_event = _websocket_subscription_event(message)
+                subscription_events.append(subscription_event)
+                if subscription_event.get("status") == "error":
+                    data = subscribe_frame["data"][0]
+                    return {
+                        "status": "subscription_error",
+                        "connector": CONNECTOR,
+                        "profile": cfg.profile,
+                        "network": "injected_transport" if injected_transport else "websocket_transport",
+                        "uri": endpoint["url"],
+                        "login": "ok",
+                        "subscription": {"items": list(data["item"]), "types": list(data["type"])},
+                        "received_frames": received_frames,
+                        "sample_payloads": sample_payloads,
+                        "subscription_events": subscription_events,
+                        "frame_errors": frame_errors,
+                        "connection_attempts": total_connection_attempts,
+                        "reconnects": reconnects,
+                        "reason": f"Kiwoom WebSocket subscription failed: {subscription_event.get('message')}",
+                    }
+                continue
+            sample_payloads.append(dict(message))
+    finally:
+        if socket is not None:
+            await socket.close()
+
+    data = subscribe_frame["data"][0]
+    return {
+        "status": "ok",
+        "connector": CONNECTOR,
+        "profile": cfg.profile,
+        "network": "injected_transport" if injected_transport else "websocket_transport",
+        "uri": endpoint["url"],
+        "login": "ok",
+        "subscription": {"items": list(data["item"]), "types": list(data["type"])},
+        "received_frames": received_frames,
+        "sample_payloads": sample_payloads,
+        "subscription_events": subscription_events,
+        "frame_errors": frame_errors,
+        "connection_attempts": total_connection_attempts,
+        "reconnects": reconnects,
+    }
+
+
+async def _connect_websocket_with_retries(
+    transport: Any,
+    uri: str,
+    *,
+    connect_attempts: int,
+    connect_backoff_seconds: float,
+) -> tuple[Any | None, int, str | None]:
+    try:
+        attempts = max(1, int(connect_attempts))
+    except (TypeError, ValueError):
+        attempts = 1
+    try:
+        backoff_seconds = max(0.0, float(connect_backoff_seconds))
+    except (TypeError, ValueError):
+        backoff_seconds = 0.0
+
+    last_error: str | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await transport.connect(uri), attempt, None
+        except Exception as exc:
+            last_error = str(exc) or exc.__class__.__name__
+            if attempt >= attempts:
+                return None, attempt, last_error
+            if backoff_seconds:
+                await asyncio.sleep(backoff_seconds)
+    return None, attempts, last_error
+
+
+async def _receive_websocket_message(socket: Any, *, message_timeout: float | None) -> dict[str, Any]:
+    receive = socket.receive_json()
+    if message_timeout is None:
+        return await receive
+    return await asyncio.wait_for(receive, timeout=max(0.0, float(message_timeout)))
+
+
+def _websockets_connect(url: str) -> Any:
+    try:
+        import websockets
+    except ModuleNotFoundError as exc:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket transport requires the websockets package.") from exc
+    return websockets.connect(url)
+
+
+def _websocket_subscription_event(message: Mapping[str, Any]) -> dict[str, Any]:
+    data_rows = _as_list(message.get("data"))
+    items: list[str] = []
+    types: list[str] = []
+    for row in data_rows:
+        if not isinstance(row, Mapping):
+            continue
+        items.extend(_as_scalar_values(row.get("item")))
+        types.extend(_as_scalar_values(row.get("type")))
+    items.extend(_as_scalar_values(message.get("items")))
+    types.extend(_as_scalar_values(message.get("types")))
+    try:
+        item_count = len(items) or int(message.get("item_count") or 0)
+    except (TypeError, ValueError):
+        item_count = len(items)
+
+    code = message.get("return_code", message.get("code"))
+    code_text = str(code).strip() if code is not None else None
+    event: dict[str, Any] = {
+        "trnm": message.get("trnm"),
+        "status": "ok" if str(code_text or "0") in {"0", ""} else "error",
+        "code": code_text,
+        "message": message.get("return_msg", message.get("message")),
+        "group_no": message.get("grp_no", message.get("group_no")),
+        "item_count": item_count,
+        "types": sorted(set(types)),
+    }
+    return {key: value for key, value in event.items() if value not in (None, [], "")}
+
+
+def _is_websocket_frame_error(message: Any) -> bool:
+    if not isinstance(message, Mapping):
+        return True
+    if str(message.get("type") or "").strip().lower() == "error":
+        return True
+    if not str(message.get("trnm") or "").strip():
+        return True
+    return False
+
+
+def _websocket_frame_error(message: Any) -> dict[str, Any]:
+    if not isinstance(message, Mapping):
+        return {"status": "error", "error": "Kiwoom WebSocket frame must be a JSON object."}
+    error = message.get("error") or message.get("message")
+    if not error:
+        error = "Kiwoom WebSocket frame missing trnm."
+    return {"status": str(message.get("status") or "error"), "error": str(error)}
+
+
+def websocket_smoke_evidence(result: Mapping[str, Any], *, max_samples: int = 3) -> dict[str, Any]:
+    """Return a credential-safe evidence summary for a Kiwoom WebSocket smoke run."""
+
+    source = dict(result or {})
+    subscription = dict(source.get("subscription") or {}) if isinstance(source.get("subscription"), Mapping) else {}
+    items = [str(item).strip() for item in subscription.get("items") or () if str(item).strip()]
+    types = [str(item).strip() for item in subscription.get("types") or () if str(item).strip()]
+    safe_subscription: dict[str, Any] = {
+        "item_count": len(items),
+        "types": types,
+    }
+
+    try:
+        sample_limit = max(0, int(max_samples))
+    except (TypeError, ValueError):
+        sample_limit = 3
+    samples = _as_list(source.get("sample_payloads"))
+    subscription_events = _as_list(source.get("subscription_events"))
+    frame_errors = _as_list(source.get("frame_errors"))
+
+    evidence = {
+        "status": source.get("status"),
+        "connector": source.get("connector") or CONNECTOR,
+        "profile": source.get("profile"),
+        "environment": source.get("environment"),
+        "network": source.get("network"),
+        "uri": source.get("uri"),
+        "login": source.get("login"),
+        "subscription": safe_subscription,
+        "received_frames": source.get("received_frames"),
+        "subscription_events": [_websocket_subscription_event(event) for event in subscription_events],
+        "frame_errors": [_websocket_frame_error(error) for error in frame_errors],
+        "sample_count": len(samples),
+        "sample_payloads": [_websocket_smoke_evidence_sample(sample) for sample in samples[:sample_limit]],
+    }
+    for key in ("reason", "timeout_seconds", "connection_attempts", "reconnects", "parameter", "requested_value"):
+        if key in source:
+            evidence[key] = source.get(key)
+    return evidence
+
+
+def write_websocket_smoke_evidence(
+    result: Mapping[str, Any],
+    path: str | Path,
+    *,
+    max_samples: int = 3,
+) -> Path:
+    """Write a credential-safe Kiwoom WebSocket smoke evidence JSON artifact."""
+
+    target = Path(path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    evidence = websocket_smoke_evidence(result, max_samples=max_samples)
+    target.write_text(json.dumps(evidence, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    return target
+
+
+async def run_websocket_smoke_with_evidence(
+    config: KoreanConnectorConfig | None = None,
+    *,
+    channel: str = "domestic_stock_realtime",
+    symbols: list[str] | tuple[str, ...],
+    evidence_path: str | Path,
+    transport: Any | None = None,
+    max_messages: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+    max_samples: int = 3,
+    allow_broker_calls: bool = False,
+    allow_live: bool = False,
+) -> dict[str, Any]:
+    """Run a gated Kiwoom WebSocket smoke flow and write redacted evidence."""
+
+    cfg = config or load_config()
+    if not allow_broker_calls:
+        return {
+            "status": "not_run",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "reason": "Kiwoom WebSocket smoke requires allow_broker_calls=True before any credentialed broker call.",
+        }
+    if cfg.environment == "live" and not allow_live:
+        return {
+            "status": "blocked",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "reason": "Live Kiwoom WebSocket smoke requires allow_live=True.",
+        }
+
+    evidence_target = Path(evidence_path).expanduser()
+    if evidence_target.exists() and evidence_target.is_dir():
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "parameter": "evidence_path",
+            "requested_value": str(evidence_target),
+            "reason": "Kiwoom WebSocket smoke evidence_path must be a file path, not a directory.",
+        }
+    if evidence_target.parent.exists() and not evidence_target.parent.is_dir():
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "parameter": "evidence_path",
+            "requested_value": str(evidence_target.parent),
+            "reason": "Kiwoom WebSocket smoke evidence_path parent directory must be a directory.",
+        }
+
+    result = await run_websocket_smoke(
+        cfg,
+        channel=channel,
+        symbols=symbols,
+        transport=transport,
+        max_messages=max_messages,
+        message_timeout=message_timeout,
+        connect_attempts=connect_attempts,
+        connect_backoff_seconds=connect_backoff_seconds,
+        reconnect_attempts=reconnect_attempts,
+        reconnect_backoff_seconds=reconnect_backoff_seconds,
+    )
+    written = write_websocket_smoke_evidence(result, evidence_path, max_samples=max_samples)
+    evidence = websocket_smoke_evidence(result, max_samples=max_samples)
+    evidence["evidence_path"] = str(written)
+    return evidence
 
 
 def get_account_snapshot(
@@ -1218,6 +1864,39 @@ def _as_list(value: Any) -> list[Mapping[str, Any]]:
     if isinstance(value, Mapping):
         return [dict(value)]
     return []
+
+
+def _as_scalar_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _websocket_smoke_evidence_sample(sample: Mapping[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key in ("trnm", "status", "channel", "type"):
+        if key in sample:
+            safe[key] = sample.get(key)
+
+    data = sample.get("data")
+    if isinstance(data, Mapping):
+        rows = [data]
+    elif isinstance(data, list):
+        rows = [item for item in data if isinstance(item, Mapping)]
+    else:
+        rows = []
+    if rows:
+        safe["data_count"] = len(rows)
+        safe["data_keys"] = sorted({str(key) for row in rows for key in row})
+
+    raw = sample.get("raw")
+    if isinstance(raw, Mapping):
+        safe["raw_keys"] = sorted(str(key) for key in raw)
+
+    return redact_payload(safe)
 
 
 def _to_float(value: Any) -> float | None:

@@ -202,6 +202,79 @@ class TestConnectorLiveDispatch:
             output_path=None,
         )
 
+    def test_kiwoom_websocket_smoke_routes_to_handler(self, tmp_path: Path) -> None:
+        target = tmp_path / "kiwoom-websocket-smoke.json"
+
+        with patch("cli._legacy.cmd_connector_kiwoom_websocket_smoke", return_value=0) as m:
+            assert self._dispatch(
+                [
+                    "connector",
+                    "kiwoom-websocket-smoke",
+                    "--profile",
+                    "kiwoom-paper-sdk",
+                    "--channel",
+                    "domestic_stock_realtime",
+                    "--symbol",
+                    "KRX:039490",
+                    "--symbol",
+                    "005930.KS",
+                    "--evidence-path",
+                    str(target),
+                    "--max-messages",
+                    "2",
+                    "--message-timeout",
+                    "1.5",
+                    "--connect-attempts",
+                    "2",
+                    "--connect-backoff-seconds",
+                    "0.25",
+                    "--reconnect-attempts",
+                    "1",
+                    "--reconnect-backoff-seconds",
+                    "0.5",
+                    "--max-samples",
+                    "1",
+                    "--allow-broker-calls",
+                    "--allow-live",
+                ]
+            ) == 0
+
+        m.assert_called_once_with(
+            "kiwoom-paper-sdk",
+            channel="domestic_stock_realtime",
+            symbols=["KRX:039490", "005930.KS"],
+            evidence_path=target,
+            max_messages=2,
+            message_timeout=1.5,
+            connect_attempts=2,
+            connect_backoff_seconds=0.25,
+            reconnect_attempts=1,
+            reconnect_backoff_seconds=0.5,
+            max_samples=1,
+            allow_broker_calls=True,
+            allow_live=True,
+        )
+
+    def test_kiwoom_websocket_smoke_rejects_unknown_channel(self, tmp_path: Path) -> None:
+        from cli._legacy import _build_parser
+
+        parser = _build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                [
+                    "connector",
+                    "kiwoom-websocket-smoke",
+                    "--profile",
+                    "kiwoom-paper-sdk",
+                    "--channel",
+                    "bogus",
+                    "--symbol",
+                    "KRX:039490",
+                    "--evidence-path",
+                    str(tmp_path / "kiwoom-websocket-smoke.json"),
+                ]
+            )
+
     def test_no_subcommand_is_usage_error(self) -> None:
         from cli._legacy import EXIT_USAGE_ERROR
 
@@ -372,6 +445,62 @@ def test_connector_smoke_audit_writes_private_audit_report(tmp_path: Path) -> No
     assert payload["smoke_status"] == "not_run"
     assert payload["broker_calls_proven"] is False
     assert output_path.stat().st_mode & 0o777 == 0o600
+
+
+# ---------------------------------------------------------------------------
+# Kiwoom WebSocket smoke
+# ---------------------------------------------------------------------------
+
+
+class TestKiwoomWebSocketSmokeCli:
+    def test_command_forwards_to_profile_scoped_service(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cli._legacy import EXIT_SUCCESS, cmd_connector_kiwoom_websocket_smoke
+
+        calls: list[dict[str, Any]] = []
+
+        def fake_smoke_service(profile_id: str | None, **kwargs: Any) -> dict[str, Any]:
+            calls.append({"profile_id": profile_id, "kwargs": kwargs})
+            return {"status": "planned", "profile_id": profile_id, "evidence_path": str(kwargs["evidence_path"])}
+
+        monkeypatch.setattr("src.trading.service.run_websocket_smoke_with_evidence", fake_smoke_service)
+
+        target = tmp_path / "kiwoom-websocket-smoke.json"
+
+        assert cmd_connector_kiwoom_websocket_smoke(
+            "kiwoom-paper-sdk",
+            channel="domestic_stock_realtime",
+            symbols=["KRX:039490"],
+            evidence_path=target,
+            max_messages=2,
+            message_timeout=1.5,
+            connect_attempts=2,
+            connect_backoff_seconds=0.25,
+            reconnect_attempts=1,
+            reconnect_backoff_seconds=0.5,
+            max_samples=1,
+        ) == EXIT_SUCCESS
+
+        assert calls == [
+            {
+                "profile_id": "kiwoom-paper-sdk",
+                "kwargs": {
+                    "channel": "domestic_stock_realtime",
+                    "symbols": ["KRX:039490"],
+                    "evidence_path": target,
+                    "max_messages": 2,
+                    "message_timeout": 1.5,
+                    "connect_attempts": 2,
+                    "connect_backoff_seconds": 0.25,
+                    "reconnect_attempts": 1,
+                    "reconnect_backoff_seconds": 0.5,
+                    "max_samples": 1,
+                    "allow_broker_calls": False,
+                    "allow_live": False,
+                },
+            }
+        ]
 
 
 # ---------------------------------------------------------------------------

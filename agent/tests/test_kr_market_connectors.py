@@ -121,3 +121,71 @@ def test_korean_connector_read_write_classification_maps() -> None:
     assert DB_TOOL_CLASS["stock_order"] is ToolClass.WRITE
     assert KIWOOM_TOOL_CLASS["ka10001"] is ToolClass.READ
     assert KIWOOM_TOOL_CLASS["kt10000"] is ToolClass.WRITE
+
+
+def test_kiwoom_websocket_smoke_service_routes_profile_and_safety_flags(monkeypatch, tmp_path) -> None:
+    from src.trading.connectors.kiwoom import sdk as kiwoom
+
+    calls: list[dict] = []
+
+    async def fake_smoke_runner(config, **kwargs):
+        calls.append({"config": config, "kwargs": kwargs})
+        return {
+            "status": "not_run",
+            "connector": "kiwoom",
+            "profile": config.profile,
+            "environment": config.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "reason": "mocked smoke runner",
+        }
+
+    monkeypatch.setattr(kiwoom, "run_websocket_smoke_with_evidence", fake_smoke_runner)
+
+    target = tmp_path / "kiwoom-websocket-smoke.json"
+    result = service.run_websocket_smoke_with_evidence(
+        "kiwoom-paper-sdk",
+        channel="domestic_stock_realtime",
+        symbols=["KRX:039490"],
+        evidence_path=target,
+        allow_broker_calls=False,
+        allow_live=False,
+        max_messages=2,
+        max_samples=1,
+    )
+
+    assert result["status"] == "not_run"
+    assert result["profile_id"] == "kiwoom-paper-sdk"
+    assert result["connector"] == "kiwoom"
+    assert result["environment"] == "paper"
+    assert result["transport"] == "broker_sdk"
+    assert calls[0]["config"].connector == "kiwoom"
+    assert calls[0]["config"].profile == "paper"
+    assert calls[0]["kwargs"] == {
+        "channel": "domestic_stock_realtime",
+        "symbols": ["KRX:039490"],
+        "evidence_path": target,
+        "max_messages": 2,
+        "message_timeout": None,
+        "connect_attempts": 1,
+        "connect_backoff_seconds": 0.0,
+        "reconnect_attempts": 0,
+        "reconnect_backoff_seconds": 0.0,
+        "max_samples": 1,
+        "allow_broker_calls": False,
+        "allow_live": False,
+    }
+
+
+def test_websocket_smoke_service_rejects_non_kiwoom_connectors(tmp_path) -> None:
+    result = service.run_websocket_smoke_with_evidence(
+        "kis-paper-sdk",
+        symbols=["KRX:005930"],
+        evidence_path=tmp_path / "kis-websocket-smoke.json",
+    )
+
+    assert result["status"] == "error"
+    assert result["profile_id"] == "kis-paper-sdk"
+    assert result["connector"] == "kis"
+    assert result["transport"] == "broker_sdk"
+    assert "websocket_smoke.run" in result["error"]

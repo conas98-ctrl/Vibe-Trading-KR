@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from src.trading.profiles import list_profiles, profile_by_id
@@ -201,6 +202,54 @@ def get_history(
             ),
         )
     return _unsupported(profile, "history.read")
+
+
+def run_websocket_smoke_with_evidence(
+    profile_id: str | None = None,
+    *,
+    channel: str = "domestic_stock_realtime",
+    symbols: list[str] | tuple[str, ...],
+    evidence_path: Any,
+    max_messages: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+    max_samples: int = 3,
+    allow_broker_calls: bool = False,
+    allow_live: bool = False,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Run a Kiwoom profile-scoped WebSocket smoke flow and write redacted evidence."""
+    profile = profile_by_id(profile_id)
+    if profile.connector != "kiwoom" or profile.transport != "broker_sdk":
+        return _unsupported(profile, "websocket_smoke.run")
+
+    module = _sdk_module(profile.connector)
+    runner = getattr(module, "run_websocket_smoke_with_evidence", None)
+    if runner is None:
+        return _unsupported(profile, "websocket_smoke.run")
+
+    config = module.build_config(profile.config, overrides)
+    result = asyncio.run(
+        runner(
+            config,
+            channel=channel,
+            symbols=symbols,
+            evidence_path=evidence_path,
+            max_messages=max_messages,
+            message_timeout=message_timeout,
+            connect_attempts=connect_attempts,
+            connect_backoff_seconds=connect_backoff_seconds,
+            reconnect_attempts=reconnect_attempts,
+            reconnect_backoff_seconds=reconnect_backoff_seconds,
+            max_samples=max_samples,
+            allow_broker_calls=allow_broker_calls,
+            allow_live=allow_live,
+        )
+    )
+    return _with_profile(profile, result)
 
 
 #: Connector → (instrument type, fixed asset class | None). ``None`` asset class

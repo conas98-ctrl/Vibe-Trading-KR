@@ -10,6 +10,7 @@ import json
 from typing import Any
 
 from src.agent.tools import BaseTool
+from src.trading.connectors.kiwoom.sdk import KIWOOM_WEBSOCKET_ENDPOINTS
 from src.trading.profiles import (
     list_profiles,
     load_selected_profile_id,
@@ -25,6 +26,7 @@ from src.trading.service import (
     get_positions,
     get_quote,
     place_order,
+    run_websocket_smoke_with_evidence,
 )
 
 
@@ -66,6 +68,36 @@ def _str_list_or_none(value: Any) -> list[str] | None:
         items = list(value)
     normalized = [str(item).strip() for item in items if str(item).strip()]
     return normalized or None
+
+
+def _int_or_default(value: Any, default: int) -> int:
+    if value in (None, ""):
+        return default
+    return int(value)
+
+
+def _float_or_default(value: Any, default: float) -> float:
+    if value in (None, ""):
+        return default
+    return float(value)
+
+
+def _bool_or_default(value: Any, default: bool) -> bool:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        parts = value.split(",")
+    else:
+        parts = list(value)
+    return [str(part).strip() for part in parts if str(part).strip()]
 
 
 TRADING_COMMON_PARAMETERS = {
@@ -172,6 +204,76 @@ class TradingCheckTool(BaseTool):
         """Check connector readiness."""
         try:
             return _json_result(check_connection(_connection(kwargs.get("connection")), **_overrides(kwargs)))
+        except Exception as exc:  # noqa: BLE001
+            return _json_result({"status": "error", "error": str(exc)})
+
+
+class TradingKiwoomWebSocketSmokeTool(BaseTool):
+    """Run the gated Kiwoom WebSocket smoke/evidence flow through a profile."""
+
+    name = "trading_kiwoom_websocket_smoke"
+    description = (
+        "Run the Kiwoom REST WebSocket smoke/evidence flow through a Kiwoom "
+        "broker SDK profile. Defaults to dry-run safety gates; set "
+        "allow_broker_calls only when operator-approved credentials are ready."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            **TRADING_COMMON_PARAMETERS,
+            "channel": {
+                "type": "string",
+                "enum": sorted(KIWOOM_WEBSOCKET_ENDPOINTS),
+                "description": "Kiwoom WebSocket channel key, e.g. domestic_stock_realtime.",
+            },
+            "symbols": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Kiwoom WebSocket subscription symbols, e.g. KRX:039490.",
+            },
+            "evidence_path": {
+                "type": "string",
+                "description": "Local JSON file path for redacted smoke evidence.",
+            },
+            "max_messages": {"type": "integer", "default": 3},
+            "message_timeout": {
+                "type": "number",
+                "description": "Optional seconds to wait for each message.",
+            },
+            "connect_attempts": {"type": "integer", "default": 1},
+            "connect_backoff_seconds": {"type": "number", "default": 0.0},
+            "reconnect_attempts": {"type": "integer", "default": 0},
+            "reconnect_backoff_seconds": {"type": "number", "default": 0.0},
+            "max_samples": {"type": "integer", "default": 3},
+            "allow_broker_calls": {"type": "boolean", "default": False},
+            "allow_live": {"type": "boolean", "default": False},
+        },
+        "required": ["symbols", "evidence_path"],
+    }
+    repeatable = True
+    is_readonly = False
+
+    def execute(self, **kwargs: Any) -> str:
+        """Run Kiwoom WebSocket smoke evidence through the profile-scoped service."""
+        try:
+            return _json_result(
+                run_websocket_smoke_with_evidence(
+                    _connection(kwargs.get("connection")),
+                    channel=str(kwargs.get("channel") or "domestic_stock_realtime").strip(),
+                    symbols=_string_list(kwargs["symbols"]),
+                    evidence_path=str(kwargs["evidence_path"]).strip(),
+                    max_messages=_int_or_default(kwargs.get("max_messages"), 3),
+                    message_timeout=_num_or_none(kwargs.get("message_timeout")),
+                    connect_attempts=_int_or_default(kwargs.get("connect_attempts"), 1),
+                    connect_backoff_seconds=_float_or_default(kwargs.get("connect_backoff_seconds"), 0.0),
+                    reconnect_attempts=_int_or_default(kwargs.get("reconnect_attempts"), 0),
+                    reconnect_backoff_seconds=_float_or_default(kwargs.get("reconnect_backoff_seconds"), 0.0),
+                    max_samples=_int_or_default(kwargs.get("max_samples"), 3),
+                    allow_broker_calls=_bool_or_default(kwargs.get("allow_broker_calls"), False),
+                    allow_live=_bool_or_default(kwargs.get("allow_live"), False),
+                    **_overrides(kwargs),
+                )
+            )
         except Exception as exc:  # noqa: BLE001
             return _json_result({"status": "error", "error": str(exc)})
 

@@ -3728,6 +3728,50 @@ def cmd_connector_smoke(
     return EXIT_RUN_FAILED
 
 
+def cmd_connector_kiwoom_websocket_smoke(
+    profile_id: Optional[str] = None,
+    *,
+    channel: str = "domestic_stock_realtime",
+    symbols: list[str],
+    evidence_path: Path,
+    max_messages: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+    max_samples: int = 3,
+    allow_broker_calls: bool = False,
+    allow_live: bool = False,
+) -> int:
+    """Run or plan a gated Kiwoom WebSocket smoke evidence capture."""
+    from src.trading.service import run_websocket_smoke_with_evidence
+
+    try:
+        result = run_websocket_smoke_with_evidence(
+            _profile_id(profile_id),
+            channel=channel,
+            symbols=symbols,
+            evidence_path=evidence_path,
+            max_messages=max_messages,
+            message_timeout=message_timeout,
+            connect_attempts=connect_attempts,
+            connect_backoff_seconds=connect_backoff_seconds,
+            reconnect_attempts=reconnect_attempts,
+            reconnect_backoff_seconds=reconnect_backoff_seconds,
+            max_samples=max_samples,
+            allow_broker_calls=allow_broker_calls,
+            allow_live=allow_live,
+        )
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Kiwoom WebSocket smoke failed:[/red] {rich_escape(str(exc))}")
+        return EXIT_RUN_FAILED
+    console.print_json(data=result)
+    if result.get("status") in {"ok", "not_run", "blocked", "planned"}:
+        return EXIT_SUCCESS
+    return EXIT_RUN_FAILED
+
+
 def _write_connector_smoke_output(payload: dict[str, Any], output_path: Path) -> None:
     """Write Korean broker smoke evidence JSON with private file permissions."""
     output_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -4057,6 +4101,22 @@ def _dispatch_connector(args: argparse.Namespace) -> int:
             require_broker_calls=args.require_broker_calls,
             json_mode=args.json_output,
             output_path=args.output,
+        )
+    if sub == "kiwoom-websocket-smoke":
+        return cmd_connector_kiwoom_websocket_smoke(
+            args.profile,
+            channel=args.channel,
+            symbols=args.symbols,
+            evidence_path=args.evidence_path,
+            max_messages=args.max_messages,
+            message_timeout=args.message_timeout,
+            connect_attempts=args.connect_attempts,
+            connect_backoff_seconds=args.connect_backoff_seconds,
+            reconnect_attempts=args.reconnect_attempts,
+            reconnect_backoff_seconds=args.reconnect_backoff_seconds,
+            max_samples=args.max_samples,
+            allow_broker_calls=args.allow_broker_calls,
+            allow_live=args.allow_live,
         )
     if sub == "authorize":
         return cmd_connector_authorize(args.profile)
@@ -4544,6 +4604,37 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     connector_smoke_audit.add_argument("--json", dest="json_output", action="store_true", help="Print JSON audit output")
     connector_smoke_audit.add_argument("--output", type=Path, help="Write Korean broker smoke audit JSON evidence")
+
+    connector_kiwoom_ws_smoke = connector_subparsers.add_parser(
+        "kiwoom-websocket-smoke",
+        help="Run or plan a gated Kiwoom WebSocket smoke evidence capture",
+    )
+    from src.trading.connectors.kiwoom.sdk import KIWOOM_WEBSOCKET_ENDPOINTS
+
+    connector_kiwoom_ws_smoke.add_argument("--profile", default=None, help="Kiwoom SDK profile id (default: selected)")
+    connector_kiwoom_ws_smoke.add_argument(
+        "--channel",
+        choices=sorted(KIWOOM_WEBSOCKET_ENDPOINTS),
+        default="domestic_stock_realtime",
+        help="Kiwoom WebSocket channel, e.g. domestic_stock_realtime",
+    )
+    connector_kiwoom_ws_smoke.add_argument(
+        "--symbol",
+        dest="symbols",
+        action="append",
+        required=True,
+        help="Kiwoom WebSocket subscription symbol; repeat for multiple symbols",
+    )
+    connector_kiwoom_ws_smoke.add_argument("--evidence-path", type=Path, required=True, help="Redacted JSON evidence file path")
+    connector_kiwoom_ws_smoke.add_argument("--max-messages", type=int, default=3, help="Maximum WebSocket messages to sample")
+    connector_kiwoom_ws_smoke.add_argument("--message-timeout", type=float, default=None, help="Seconds to wait for each message")
+    connector_kiwoom_ws_smoke.add_argument("--connect-attempts", type=int, default=1, help="Connection attempts before failing")
+    connector_kiwoom_ws_smoke.add_argument("--connect-backoff-seconds", type=float, default=0.0, help="Delay between connection attempts")
+    connector_kiwoom_ws_smoke.add_argument("--reconnect-attempts", type=int, default=0, help="Reconnect attempts after receive drops")
+    connector_kiwoom_ws_smoke.add_argument("--reconnect-backoff-seconds", type=float, default=0.0, help="Delay between reconnect attempts")
+    connector_kiwoom_ws_smoke.add_argument("--max-samples", type=int, default=3, help="Maximum redacted samples to keep in evidence")
+    connector_kiwoom_ws_smoke.add_argument("--allow-broker-calls", action="store_true", help="Actually call read-only Kiwoom WebSocket APIs")
+    connector_kiwoom_ws_smoke.add_argument("--allow-live", action="store_true", help="Allow live Kiwoom checks in addition to --allow-broker-calls")
 
     for name, help_text in (
         ("start", "Start the selected live connector runner"),

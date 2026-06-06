@@ -241,6 +241,143 @@ vibe-trading --swarm-run investment_committee '{"topic":"BTC outlook"}'</code></
         ]
       },
       {
+        id: "tools/kiwoom-websocket-smoke-runbook",
+        title: "Kiwoom WebSocket Smoke Runbook",
+        description: "키움증권 REST OpenAPI 국내주식 WebSocket smoke를 안전하게 실행하고 evidence를 남기는 절차.",
+        lead: "Kiwoom WebSocket smoke는 기본적으로 broker call을 하지 않으며, 실제 Kiwoom REST OpenAPI 네트워크 호출은 operator가 명시적으로 opt-in 했을 때만 실행됩니다.",
+        sections: [
+          {
+            id: "official-surfaces",
+            title: "공식 확인 표면",
+            body: `
+              <p>이 runbook은 키움증권 REST OpenAPI의 국내주식 WebSocket smoke 흐름을 Vibe-Trading에서 확인하기 위한 한국어 절차입니다. 대상 profile은 <code>kiwoom-paper-sdk</code>, <code>kiwoom-live-sdk-readonly</code>, <code>kiwoom-paper-trade</code>, <code>kiwoom-live-trade</code>입니다.</p>
+              <ul>
+                <li><a href="https://openapi.kiwoom.com/" target="_blank" rel="noreferrer">Kiwoom REST API 포털</a></li>
+                <li><a href="https://openapi.kiwoom.com/guide/apiguide" target="_blank" rel="noreferrer">Kiwoom REST API 가이드</a></li>
+                <li><a href="https://www.kiwoom.com/h/customer/download/VOpenApiInfoView?dummyVal=0" target="_blank" rel="noreferrer">Kiwoom Open API+ Windows COM 안내</a></li>
+              </ul>
+              <p>Kiwoom REST API 포털은 OAuth 접근토큰, 국내주식 계좌/시세/실시간시세/조건검색/주문 API, 운영 도메인 <code>https://api.kiwoom.com</code>, 모의투자 REST 도메인 <code>https://mockapi.kiwoom.com</code>을 안내합니다. Vibe-Trading의 Kiwoom WebSocket smoke는 공식 REST WebSocket endpoint <code>wss://api.kiwoom.com:10000/api/dostk/websocket</code>와 <code>LOGIN</code>, <code>REG</code>, <code>PING</code> frame 계약을 작게 감싼 credential-gated 확인 흐름입니다.</p>
+              <p>Windows 전용 Kiwoom Open API+ OCX bridge는 별도 connector family입니다. 이 runbook은 REST OpenAPI WebSocket smoke만 다루며, Open API+ 설치, OCX 등록, KOA Studio, Windows bridge smoke는 완료로 claim하지 않습니다.</p>
+            `
+          },
+          {
+            id: "prerequisites",
+            title: "준비물",
+            body: `
+              <ol>
+                <li>Kiwoom REST API 사용신청이 완료된 계정.</li>
+                <li>REST OpenAPI용 app key와 secret key.</li>
+                <li><code>~/.vibe-trading/kiwoom.json</code> 로컬 설정 파일. 이 파일은 저장소에 커밋하지 않습니다.</li>
+                <li>Credentialed smoke를 수행할 시장 시간과 Kiwoom API 이용 조건 확인.</li>
+              </ol>
+              <pre><code>{
+  "profile": "paper",
+  "app_key": "YOUR_KIWOOM_APP_KEY",
+  "app_secret": "YOUR_KIWOOM_SECRET_KEY",
+  "access_token": "OPTIONAL_PREISSUED_ACCESS_TOKEN"
+}</code></pre>
+              <p><code>profile</code>은 <code>paper</code>, <code>live-readonly</code>, <code>live</code> 중 하나입니다. Kiwoom REST guide는 모의투자 REST 도메인을 안내하지만, 이 WebSocket smoke의 실계정 수신 proof는 실제 credential, endpoint, 계정 권한, 장중 수신 가능 상태를 별도로 확인하기 전까지 claim하지 않습니다.</p>
+            `
+          },
+          {
+            id: "dry-run",
+            title: "Dry-run 확인",
+            body: `
+              <p>기본 명령은 broker call을 하지 않습니다. credential이나 network가 준비되지 않은 CI, 리뷰 환경, 문서 검증에서는 이 명령을 먼저 사용합니다.</p>
+              <pre><code>vibe-trading connector kiwoom-websocket-smoke \\
+  --profile kiwoom-paper-sdk \\
+  --channel domestic_stock_realtime \\
+  --symbol 005930 \\
+  --evidence-path ~/.vibe-trading/evidence/kiwoom-websocket-smoke-domestic-stock.json</code></pre>
+              <p>예상 결과는 <code>status=not_run</code>, <code>network=not_attempted</code>, <code>evidence_path=null</code>입니다. 이 상태는 실패가 아니라 안전 기본값입니다. 실제 token 사용, WebSocket 연결, evidence 파일 생성은 <code>--allow-broker-calls</code>가 있어야 진행됩니다.</p>
+            `
+          },
+          {
+            id: "credentialed-smoke",
+            title: "Credentialed smoke",
+            body: `
+              <p>credential과 이용 조건이 준비된 뒤에만 broker call을 켭니다. smoke는 주문을 넣지 않고 WebSocket login, subscription, ping/real frame 수신, redacted evidence 작성만 확인합니다.</p>
+              <pre><code>vibe-trading connector kiwoom-websocket-smoke \\
+  --profile kiwoom-paper-sdk \\
+  --channel domestic_stock_realtime \\
+  --symbol 005930 \\
+  --evidence-path ~/.vibe-trading/evidence/kiwoom-websocket-smoke-domestic-stock.json \\
+  --max-messages 3 \\
+  --message-timeout 10 \\
+  --allow-broker-calls</code></pre>
+              <p>실전 읽기 전용 profile에서는 추가로 <code>--allow-live</code>가 필요합니다.</p>
+              <pre><code>vibe-trading connector kiwoom-websocket-smoke \\
+  --profile kiwoom-live-sdk-readonly \\
+  --channel domestic_stock_realtime \\
+  --symbol 005930 \\
+  --evidence-path ~/.vibe-trading/evidence/kiwoom-websocket-smoke-live-readonly.json \\
+  --max-messages 3 \\
+  --message-timeout 10 \\
+  --allow-broker-calls \\
+  --allow-live</code></pre>
+              <p>실전 주문 profile인 <code>kiwoom-live-trade</code>는 live order mandate, kill switch, pre-trade gate, audit ledger의 적용 대상입니다. WebSocket smoke 자체는 읽기/수신 확인용이지만, 실전 profile 접근은 별도 live opt-in 없이는 차단합니다.</p>
+            `
+          },
+          {
+            id: "channels",
+            title: "채널 선택",
+            body: `
+              <ul>
+                <li><code>domestic_stock_realtime</code>: 공식 REST WebSocket sample의 국내주식 실시간 channel. Vibe-Trading은 <code>LOGIN</code> frame 뒤 <code>REG</code> subscription을 보내며 기본 type code는 <code>0B</code>입니다.</li>
+              </ul>
+              <p><code>--symbol</code>은 국내주식 종목코드입니다. 예: <code>005930</code>. <code>KRX:039490</code>, <code>005930.KS</code>처럼 prefix/suffix가 붙은 값은 내부에서 숫자 종목코드로 정규화됩니다.</p>
+              <p>전체 지원 채널은 CLI의 <code>--channel</code> choices와 MCP tool schema enum으로 노출됩니다. 잘못된 채널 이름이나 빈 symbol은 token 사용 또는 WebSocket 연결 전에 거부됩니다.</p>
+            `
+          },
+          {
+            id: "evidence",
+            title: "Evidence 보관",
+            body: `
+              <p><code>--evidence-path</code>에는 로컬 전용 경로를 지정합니다. 권장 위치는 <code>~/.vibe-trading/evidence/</code>처럼 저장소 밖에 있는 디렉터리입니다.</p>
+              <ul>
+                <li>app key, secret key, access token은 기록하지 않습니다.</li>
+                <li>subscription에는 symbol 원문 대신 <code>item_count</code>와 channel summary 중심으로 남깁니다.</li>
+                <li>sample payload는 이벤트 종류와 field count 중심으로 축약하고 redaction을 한 번 더 적용합니다.</li>
+                <li>계좌번호, token 원문, 주문 원문 frame, 민감한 체결 정보는 public PR이나 공개 문서에 붙이지 않습니다.</li>
+              </ul>
+              <p>Credentialed evidence에는 profile, endpoint, 수신 상태, channel summary가 포함될 수 있으므로 원본 JSON은 로컬에 보관합니다. 공개 PR에는 어떤 profile/channel을 어떤 opt-in으로 확인했는지와 redaction 방침만 요약합니다.</p>
+            `
+          },
+          {
+            id: "cli-mcp-tool",
+            title: "CLI / MCP 경로",
+            body: `
+              <p>CLI에서는 <code>vibe-trading connector kiwoom-websocket-smoke</code>를 사용합니다. MCP client에서는 <code>trading_kiwoom_websocket_smoke</code> tool을 사용합니다. 필수 인자는 <code>symbol</code> 또는 <code>symbols</code>, <code>evidence_path</code>입니다. <code>allow_broker_calls</code> 기본값은 <code>false</code>이며, 실전 profile은 <code>allow_live=true</code>도 요구합니다.</p>
+              <pre><code>{
+  "connection": "kiwoom-paper-sdk",
+  "channel": "domestic_stock_realtime",
+  "symbols": ["005930"],
+  "evidence_path": "~/.vibe-trading/evidence/kiwoom-websocket-smoke-domestic-stock.json",
+  "max_messages": 3,
+  "message_timeout": 10,
+  "allow_broker_calls": true
+}</code></pre>
+            `
+          },
+          {
+            id: "non-claims",
+            title: "아직 claim하지 않는 것",
+            body: `
+              <p>이 runbook은 절차와 safety gate를 고정합니다. 다음 항목은 실제 계정 credential, Kiwoom REST API 신청 상태, 시장 시간, 이용 조건 확인 전까지 완료로 claim하지 않습니다.</p>
+              <ul>
+                <li>실제 Kiwoom WebSocket에서 frame을 수신했다는 credentialed proof.</li>
+                <li>실전 주문 가능성 또는 실전 주문 권한.</li>
+                <li>Kiwoom market data의 재배포, 저장, 공개 공유 허용 여부.</li>
+                <li>REST WebSocket channel별 운영 한도와 rate-limit의 포괄 검증.</li>
+                <li>Windows Open API+ OCX bridge 설치, 로그인, KOA Studio, COM event smoke.</li>
+                <li>장중/장후/휴장일별 수신 품질 보장.</li>
+              </ul>
+              <p>Credentialed smoke를 수행한 뒤에는 로컬 evidence JSON을 검토하고, public PR에는 원본 credential/evidence를 공개하지 않았다는 요약만 남깁니다.</p>
+            `
+          }
+        ]
+      },
+      {
         id: "tools/shadow-account",
         title: "Shadow Account",
         description: "Turn a broker journal into behavior diagnostics and a counterfactual strategy path.",

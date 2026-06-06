@@ -859,6 +859,88 @@ def trading_history(
     return registry.execute("trading_history", params)
 
 
+@mcp.tool
+def trading_kiwoom_websocket_smoke(
+    symbols: list[str],
+    evidence_path: str,
+    channel: str = "domestic_stock_realtime",
+    connection: str | None = None,
+    host: str | None = None,
+    port: int | None = None,
+    client_id: int | None = None,
+    account: str | None = None,
+    max_messages: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+    max_samples: int = 3,
+    allow_broker_calls: bool = False,
+    allow_live: bool = False,
+) -> str:
+    """Run gated Kiwoom WebSocket smoke/evidence through the selected profile.
+
+    This never places orders. Broker calls stay disabled unless the operator
+    explicitly sets ``allow_broker_calls``. Live profiles also require
+    ``allow_live``.
+
+    Args:
+        channel: Kiwoom WebSocket channel key such as domestic_stock_realtime.
+        symbols: Kiwoom WebSocket subscription symbols, e.g. ``KRX:039490``.
+        evidence_path: Local JSON file path for redacted smoke evidence.
+        connection: Optional profile id. Defaults to the selected profile.
+        host: Optional local host override.
+        port: Optional local socket port override.
+        client_id: Optional local client id override.
+        account: Optional account code filter.
+        max_messages: Maximum received events before stopping.
+        message_timeout: Optional seconds to wait for each message.
+        connect_attempts: Initial connect attempts before failing.
+        connect_backoff_seconds: Backoff between initial connect attempts.
+        reconnect_attempts: Receive-side reconnect/resubscribe attempts.
+        reconnect_backoff_seconds: Backoff between reconnect attempts.
+        max_samples: Maximum redacted sample events to keep.
+        allow_broker_calls: Explicit opt-in for broker network calls.
+        allow_live: Explicit opt-in for live-profile smoke.
+    """
+    from src.trading.connectors.kiwoom.sdk import KIWOOM_WEBSOCKET_ENDPOINTS
+
+    channel_key = str(channel or "").strip().lower()
+    if channel_key not in KIWOOM_WEBSOCKET_ENDPOINTS:
+        return json.dumps(
+            {
+                "status": "error",
+                "error_type": "validation",
+                "error": f"unsupported Kiwoom WebSocket channel: {channel!r}",
+                "supported_channels": sorted(KIWOOM_WEBSOCKET_ENDPOINTS),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    params = _trading_common_args(connection=connection, host=host, port=port, client_id=client_id, account=account)
+    params.update(
+        {
+            "channel": channel_key,
+            "symbols": symbols,
+            "evidence_path": evidence_path,
+            "max_messages": max_messages,
+            "connect_attempts": connect_attempts,
+            "connect_backoff_seconds": connect_backoff_seconds,
+            "reconnect_attempts": reconnect_attempts,
+            "reconnect_backoff_seconds": reconnect_backoff_seconds,
+            "max_samples": max_samples,
+            "allow_broker_calls": allow_broker_calls,
+            "allow_live": allow_live,
+        }
+    )
+    if message_timeout is not None:
+        params["message_timeout"] = message_timeout
+    registry = _get_registry()
+    return registry.execute("trading_kiwoom_websocket_smoke", params)
+
+
 # ---------------------------------------------------------------------------
 # Swarm team tool
 # ---------------------------------------------------------------------------
