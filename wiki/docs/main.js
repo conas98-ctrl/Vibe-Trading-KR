@@ -1,13 +1,17 @@
-import { initTheme } from "/theme.js";
+import { initTheme } from "../theme.js";
 import {
   DOCS_DEFAULT_PAGE,
   DOCS_DEFAULT_VERSION,
   DOCS_LATEST_ALIAS,
   DOCS_STRUCTURE,
   DOCS_VERSIONS
-} from "/docs/content.js";
+} from "./content.js";
 
-const REPO = "HKUDS/Vibe-Trading";
+// Site base path (e.g. "/Vibe-Trading-KR" on GitHub project Pages, "" at domain root).
+// Derived from this module's URL so it survives a repo rename or a custom-domain move.
+const BASE = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+
+const REPO = "pinehill99/Vibe-Trading-KR";
 const API = `https://api.github.com/repos/${REPO}`;
 const STARS_CACHE_KEY = "vibetrading-github-stars";
 const STARS_TTL_MS = 12 * 60 * 60 * 1000;
@@ -59,8 +63,12 @@ function slugify(text) {
     .replace(/^-|-$/g, "");
 }
 
+function relPath() {
+  return location.pathname.startsWith(BASE) ? location.pathname.slice(BASE.length) : location.pathname;
+}
+
 function routeParts() {
-  const normalized = location.pathname.replace(/\/+$/, "");
+  const normalized = relPath().replace(/\/+$/, "");
   if (!normalized || normalized === "/docs" || normalized === "/docs/index.html") {
     return { version: DOCS_LATEST_ALIAS, pageId: DOCS_DEFAULT_PAGE };
   }
@@ -70,7 +78,7 @@ function routeParts() {
 }
 
 function canonicalPath(pageId, version = DOCS_LATEST_ALIAS) {
-  return `/docs/${version}/${pageId}`;
+  return `${BASE}/docs/${version}/${pageId}`;
 }
 
 function resolvePage(pageId) {
@@ -83,7 +91,7 @@ function setMeta(page, version) {
   document.querySelector('meta[name="description"]')?.setAttribute("content", description);
   document.querySelector('meta[property="og:title"]')?.setAttribute("content", `${page.title} - Vibe-Trading Docs`);
   document.querySelector('meta[property="og:description"]')?.setAttribute("content", description);
-  const canonical = `https://vibetrading.wiki${canonicalPath(page.id, version)}`;
+  const canonical = canonicalPath(page.id, version);
   document.querySelector('meta[property="og:url"]')?.setAttribute("content", canonical);
   document.querySelector("link[rel='canonical']")?.setAttribute("href", canonical);
 }
@@ -183,7 +191,8 @@ function renderCurrent() {
   const resolvedVersion = version === DOCS_LATEST_ALIAS ? DOCS_LATEST_ALIAS : DOCS_DEFAULT_VERSION;
   const page = resolvePage(pageId);
 
-  if (location.pathname === "/docs" || location.pathname === "/docs/" || location.pathname === "/docs/index.html") {
+  const rel = relPath();
+  if (rel === "/docs" || rel === "/docs/" || rel === "/docs/index.html") {
     history.replaceState({}, "", canonicalPath(page.id, DOCS_LATEST_ALIAS));
   }
 

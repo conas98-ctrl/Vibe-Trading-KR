@@ -49,4 +49,6 @@ jobs:
           test -f wiki/_redirects
           test -f wiki/_headers
           test -f wiki/assets/icon.png
-          ! grep -R "localhost\\|nanobot" wiki --exclude=README.md
+          # Guard the deployed static site only (HTML/CSS/JS); prose docs such as
+          # wiki/docs/ko/*.md legitimately mention "localhost" (broker bridge tokens).
+          ! grep -R "localhost\\|nanobot" wiki --include='*.html' --include='*.css' --include='*.js'
