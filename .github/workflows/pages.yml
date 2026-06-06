@@ -1,0 +1,50 @@
+name: Deploy Wiki to GitHub Pages
+
+# Publishes the static wiki/ directory to GitHub Pages.
+# One-time setup: repo Settings -> Pages -> Source = "GitHub Actions".
+# The site is served at https://<owner>.github.io/<repo>/ (project sub-path);
+# internal paths are prefixed with /Vibe-Trading-KR accordingly.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "wiki/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Add SPA 404 fallback for docs deep links
+        # GitHub Pages has no _redirects support; serving the docs app from
+        # 404.html lets direct hits on /docs/<version>/<page> route client-side.
+        run: cp wiki/docs/index.html wiki/404.html
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: wiki
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

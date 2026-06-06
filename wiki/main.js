@@ -1,6 +1,6 @@
 import { initTheme } from "./theme.js";
 
-const REPO = "HKUDS/Vibe-Trading";
+const REPO = "pinehill99/Vibe-Trading-KR";
 const API = `https://api.github.com/repos/${REPO}`;
 const STARS_CACHE_KEY = "vibetrading-github-stars";
 const STARS_TTL_MS = 12 * 60 * 60 * 1000;
@@ -88,7 +88,7 @@ function initInstallTabs() {
 
 async function applyLocale() {
   try {
-    const response = await fetch("/locales/en.json");
+    const response = await fetch(new URL("locales/en.json", import.meta.url));
     if (!response.ok) return;
     const messages = await response.json();
     document.querySelectorAll("[data-i18n]").forEach((el) => {
