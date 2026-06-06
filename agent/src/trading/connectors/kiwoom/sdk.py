@@ -108,6 +108,225 @@ KIWOOM_WEBSOCKET_REALTIME_TYPES: dict[str, str] = {
     "1h": "VI발동/해제",
 }
 
+KIWOOM_WEBSOCKET_ORDERBOOK_FIELDS: dict[str, str] = {
+    "21": "호가시간",
+    "41": "매도호가1",
+    "61": "매도호가수량1",
+    "81": "매도호가직전대비1",
+    "51": "매수호가1",
+    "71": "매수호가수량1",
+    "91": "매수호가직전대비1",
+    "42": "매도호가2",
+    "62": "매도호가수량2",
+    "82": "매도호가직전대비2",
+    "52": "매수호가2",
+    "72": "매수호가수량2",
+    "92": "매수호가직전대비2",
+    "43": "매도호가3",
+    "63": "매도호가수량3",
+    "83": "매도호가직전대비3",
+    "53": "매수호가3",
+    "73": "매수호가수량3",
+    "93": "매수호가직전대비3",
+    "44": "매도호가4",
+    "64": "매도호가수량4",
+    "84": "매도호가직전대비4",
+    "54": "매수호가4",
+    "74": "매수호가수량4",
+    "94": "매수호가직전대비4",
+    "45": "매도호가5",
+    "65": "매도호가수량5",
+    "85": "매도호가직전대비5",
+    "55": "매수호가5",
+    "75": "매수호가수량5",
+    "95": "매수호가직전대비5",
+    "46": "매도호가6",
+    "66": "매도호가수량6",
+    "86": "매도호가직전대비6",
+    "56": "매수호가6",
+    "76": "매수호가수량6",
+    "96": "매수호가직전대비6",
+    "47": "매도호가7",
+    "67": "매도호가수량7",
+    "87": "매도호가직전대비7",
+    "57": "매수호가7",
+    "77": "매수호가수량7",
+    "97": "매수호가직전대비7",
+    "48": "매도호가8",
+    "68": "매도호가수량8",
+    "88": "매도호가직전대비8",
+    "58": "매수호가8",
+    "78": "매수호가수량8",
+    "98": "매수호가직전대비8",
+    "49": "매도호가9",
+    "69": "매도호가수량9",
+    "89": "매도호가직전대비9",
+    "59": "매수호가9",
+    "79": "매수호가수량9",
+    "99": "매수호가직전대비9",
+    "50": "매도호가10",
+    "70": "매도호가수량10",
+    "60": "매수호가10",
+    "90": "매도호가직전대비10",
+    "80": "매수호가수량10",
+    "100": "매수호가직전대비10",
+    "121": "매도호가총잔량",
+    "122": "매도호가총잔량직전대비",
+    "125": "매수호가총잔량",
+    "126": "매수호가총잔량직전대비",
+    "23": "예상체결가",
+    "24": "예상체결수량",
+    "128": "순매수잔량",
+    "129": "매수비율",
+    "138": "순매도잔량",
+    "139": "매도비율",
+    "200": "예상체결가전일종가대비",
+    "201": "예상체결가전일종가대비등락율",
+    "238": "예상체결가전일종가대비기호",
+    "291": "예상체결가",
+    "292": "예상체결량",
+    "293": "예상체결가전일대비기호",
+    "294": "예상체결가전일대비",
+    "295": "예상체결가전일대비등락율",
+    "621": "LP매도호가수량1",
+    "631": "LP매수호가수량1",
+    "622": "LP매도호가수량2",
+    "632": "LP매수호가수량2",
+    "623": "LP매도호가수량3",
+    "633": "LP매수호가수량3",
+    "624": "LP매도호가수량4",
+    "634": "LP매수호가수량4",
+    "625": "LP매도호가수량5",
+    "635": "LP매수호가수량5",
+    "626": "LP매도호가수량6",
+    "636": "LP매수호가수량6",
+    "627": "LP매도호가수량7",
+    "637": "LP매수호가수량7",
+    "628": "LP매도호가수량8",
+    "638": "LP매수호가수량8",
+    "629": "LP매도호가수량9",
+    "639": "LP매수호가수량9",
+    "630": "LP매도호가수량10",
+    "640": "LP매수호가수량10",
+    "13": "누적거래량",
+    "299": "전일거래량대비예상체결율",
+    "215": "장운영구분",
+    "216": "투자자별ticker",
+    "6044": "KRX 매도호가잔량1",
+    "6045": "KRX 매도호가잔량2",
+    "6046": "KRX 매도호가잔량3",
+    "6047": "KRX 매도호가잔량4",
+    "6048": "KRX 매도호가잔량5",
+    "6049": "KRX 매도호가잔량6",
+    "6050": "KRX 매도호가잔량7",
+    "6051": "KRX 매도호가잔량8",
+    "6052": "KRX 매도호가잔량9",
+    "6053": "KRX 매도호가잔량10",
+    "6054": "KRX 매수호가잔량1",
+    "6055": "KRX 매수호가잔량2",
+    "6056": "KRX 매수호가잔량3",
+    "6057": "KRX 매수호가잔량4",
+    "6058": "KRX 매수호가잔량5",
+    "6059": "KRX 매수호가잔량6",
+    "6060": "KRX 매수호가잔량7",
+    "6061": "KRX 매수호가잔량8",
+    "6062": "KRX 매수호가잔량9",
+    "6063": "KRX 매수호가잔량10",
+    "6064": "KRX 매도호가총잔량",
+    "6065": "KRX 매수호가총잔량",
+    "6066": "NXT 매도호가잔량1",
+    "6067": "NXT 매도호가잔량2",
+    "6068": "NXT 매도호가잔량3",
+    "6069": "NXT 매도호가잔량4",
+    "6070": "NXT 매도호가잔량5",
+    "6071": "NXT 매도호가잔량6",
+    "6072": "NXT 매도호가잔량7",
+    "6073": "NXT 매도호가잔량8",
+    "6074": "NXT 매도호가잔량9",
+    "6075": "NXT 매도호가잔량10",
+    "6076": "NXT 매수호가잔량1",
+    "6077": "NXT 매수호가잔량2",
+    "6078": "NXT 매수호가잔량3",
+    "6079": "NXT 매수호가잔량4",
+    "6080": "NXT 매수호가잔량5",
+    "6081": "NXT 매수호가잔량6",
+    "6082": "NXT 매수호가잔량7",
+    "6083": "NXT 매수호가잔량8",
+    "6084": "NXT 매수호가잔량9",
+    "6085": "NXT 매수호가잔량10",
+    "6086": "NXT 매도호가총잔량",
+    "6087": "NXT 매수호가총잔량",
+    "6100": "KRX 중간가 매도 총잔량 증감",
+    "6101": "KRX 중간가 매도 총잔량",
+    "6102": "KRX 중간가",
+    "6103": "KRX 중간가 매수 총잔량",
+    "6104": "KRX 중간가 매수 총잔량 증감",
+    "6105": "NXT중간가 매도 총잔량 증감",
+    "6106": "NXT중간가 매도 총잔량",
+    "6107": "NXT중간가",
+    "6108": "NXT중간가 매수 총잔량",
+    "6109": "NXT중간가 매수 총잔량 증감",
+    "6110": "KRX중간가대비",
+    "6111": "KRX중간가대비 기호",
+    "6112": "KRX중간가대비등락율",
+    "6113": "NXT중간가대비",
+    "6114": "NXT중간가대비 기호",
+    "6115": "NXT중간가대비등락율",
+}
+
+
+KIWOOM_WEBSOCKET_TRADE_FIELDS: dict[str, str] = {
+    "20": "체결시간",
+    "10": "현재가",
+    "11": "전일대비",
+    "12": "등락율",
+    "27": "(최우선)매도호가",
+    "28": "(최우선)매수호가",
+    "15": "거래량",
+    "13": "누적거래량",
+    "14": "누적거래대금",
+    "16": "시가",
+    "17": "고가",
+    "18": "저가",
+    "25": "전일대비기호",
+    "26": "전일거래량대비(계약,주)",
+    "29": "거래대금증감",
+    "30": "전일거래량대비(비율)",
+    "31": "거래회전율",
+    "32": "거래비용",
+    "228": "체결강도",
+    "311": "시가총액(억)",
+    "290": "장구분",
+    "691": "K.O 접근도",
+    "567": "상한가발생시간",
+    "568": "하한가발생시간",
+    "851": "전일 동시간 거래량 비율",
+    "1890": "시가시간",
+    "1891": "고가시간",
+    "1892": "저가시간",
+    "1030": "매도체결량",
+    "1031": "매수체결량",
+    "1032": "매수비율",
+    "1071": "매도체결건수",
+    "1072": "매수체결건수",
+    "1313": "순간거래대금",
+    "1315": "매도체결량_단건",
+    "1316": "매수체결량_단건",
+    "1314": "순매수체결량",
+    "1497": "CFD증거금",
+    "1498": "유지증거금",
+    "620": "당일거래평균가",
+    "732": "CFD거래비용",
+    "852": "대주거래비용",
+    "9081": "거래소구분",
+}
+
+
+KIWOOM_WEBSOCKET_BEST_QUOTE_FIELDS: dict[str, str] = {
+    "27": "(최우선)매도호가",
+    "28": "(최우선)매수호가",
+}
+
 
 def config_path() -> Path:
     return get_runtime_root() / CONFIG_FILENAME
@@ -188,6 +407,167 @@ def websocket_control_reply(message: Mapping[str, Any]) -> dict[str, Any] | None
         reason = str(message.get("return_msg") or "unknown error").strip()
         raise KoreanConnectorConfigError(f"Kiwoom WebSocket login failed: {reason}")
     return None
+
+
+def parse_websocket_orderbook_snapshots(message: Mapping[str, Any]) -> list[dict[str, Any]]:
+    trnm = str(message.get("trnm") or "").strip().upper()
+    if trnm != "REAL":
+        raise KoreanConnectorConfigError(f"Kiwoom WebSocket orderbook parser expected REAL, got {trnm or 'missing'}.")
+
+    data = message.get("data")
+    if isinstance(data, Mapping):
+        rows = [dict(data)]
+    elif isinstance(data, list):
+        if any(not isinstance(item, Mapping) for item in data):
+            raise KoreanConnectorConfigError("Kiwoom WebSocket orderbook requires data mappings.")
+        rows = [dict(item) for item in data]
+    else:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket orderbook requires data mapping or list.")
+
+    snapshots = []
+    for item in rows:
+        real_type = str(item.get("type") or "").strip()
+        if real_type != "0D":
+            raise KoreanConnectorConfigError(f"Kiwoom WebSocket orderbook parser expected type 0D, got {real_type or 'missing'}.")
+        values = item.get("values")
+        if not isinstance(values, Mapping):
+            raise KoreanConnectorConfigError("Kiwoom WebSocket orderbook requires values mapping.")
+        raw_values = {str(key): value for key, value in values.items()}
+        snapshots.append(
+            {
+                "type": real_type,
+                "name": str(item.get("name") or KIWOOM_WEBSOCKET_REALTIME_TYPES["0D"]).strip(),
+                "symbol": _normalize_position_symbol(item.get("item")),
+                "time": str(raw_values.get("21") or "").strip(),
+                "asks": [_orderbook_level(raw_values, level, side="ask") for level in range(1, 11)],
+                "bids": [_orderbook_level(raw_values, level, side="bid") for level in range(1, 11)],
+                "total_ask_quantity": _to_float(raw_values.get("121")),
+                "total_ask_change": _to_float(raw_values.get("122")),
+                "total_bid_quantity": _to_float(raw_values.get("125")),
+                "total_bid_change": _to_float(raw_values.get("126")),
+                "expected_price": _to_abs_float(raw_values.get("23")),
+                "expected_quantity": _to_float(raw_values.get("24")),
+                "net_bid_quantity": _to_float(raw_values.get("128")),
+                "bid_ratio": _to_float(raw_values.get("129")),
+                "net_ask_quantity": _to_float(raw_values.get("138")),
+                "ask_ratio": _to_float(raw_values.get("139")),
+                "expected_close_change": _to_float(raw_values.get("200")),
+                "expected_close_change_rate": _to_float(raw_values.get("201")),
+                "expected_close_change_sign": str(raw_values.get("238") or "").strip(),
+                "preopen_expected_price": _to_abs_float(raw_values.get("291")),
+                "preopen_expected_quantity": _to_float(raw_values.get("292")),
+                "preopen_change_sign": str(raw_values.get("293") or "").strip(),
+                "preopen_change": _to_float(raw_values.get("294")),
+                "preopen_change_rate": _to_float(raw_values.get("295")),
+                "cumulative_volume": _to_float(raw_values.get("13")),
+                "expected_volume_rate": _to_float(raw_values.get("299")),
+                "session_code": str(raw_values.get("215") or "").strip(),
+                "investor_ticker": str(raw_values.get("216") or "").strip(),
+                "krx_total_ask_quantity": _to_float(raw_values.get("6064")),
+                "krx_total_bid_quantity": _to_float(raw_values.get("6065")),
+                "nxt_total_ask_quantity": _to_float(raw_values.get("6086")),
+                "nxt_total_bid_quantity": _to_float(raw_values.get("6087")),
+                "krx_mid_price": _to_abs_float(raw_values.get("6102")),
+                "nxt_mid_price": _to_abs_float(raw_values.get("6107")),
+                "raw_values": raw_values,
+                "raw": dict(item),
+            }
+        )
+    return snapshots
+
+
+def parse_websocket_trade_ticks(message: Mapping[str, Any]) -> list[dict[str, Any]]:
+    trnm = str(message.get("trnm") or "").strip().upper()
+    if trnm != "REAL":
+        raise KoreanConnectorConfigError(f"Kiwoom WebSocket trade tick parser expected REAL, got {trnm or 'missing'}.")
+
+    data = message.get("data")
+    if isinstance(data, Mapping):
+        rows = [dict(data)]
+    elif isinstance(data, list):
+        if any(not isinstance(item, Mapping) for item in data):
+            raise KoreanConnectorConfigError("Kiwoom WebSocket trade tick requires data mappings.")
+        rows = [dict(item) for item in data]
+    else:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket trade tick requires data mapping or list.")
+
+    ticks = []
+    for item in rows:
+        real_type = str(item.get("type") or "").strip()
+        if real_type != "0B":
+            raise KoreanConnectorConfigError(f"Kiwoom WebSocket trade tick parser expected type 0B, got {real_type or 'missing'}.")
+        values = item.get("values")
+        if not isinstance(values, Mapping):
+            raise KoreanConnectorConfigError("Kiwoom WebSocket trade tick requires values mapping.")
+        raw_values = {str(key): value for key, value in values.items()}
+        signed_volume = _to_float(raw_values.get("15"))
+        ticks.append(
+            {
+                "type": real_type,
+                "name": str(item.get("name") or KIWOOM_WEBSOCKET_REALTIME_TYPES["0B"]).strip(),
+                "symbol": _normalize_position_symbol(item.get("item")),
+                "time": str(raw_values.get("20") or "").strip(),
+                "last": _to_abs_float(raw_values.get("10")),
+                "change": _to_float(raw_values.get("11")),
+                "change_rate": _to_float(raw_values.get("12")),
+                "best_ask": _to_abs_float(raw_values.get("27")),
+                "best_bid": _to_abs_float(raw_values.get("28")),
+                "trade_volume": abs(signed_volume) if signed_volume is not None else None,
+                "signed_trade_volume": signed_volume,
+                "trade_side": _signed_volume_side(raw_values.get("15")),
+                "cumulative_volume": _to_float(raw_values.get("13")),
+                "cumulative_value_million_krw": _to_float(raw_values.get("14")),
+                "open": _to_abs_float(raw_values.get("16")),
+                "high": _to_abs_float(raw_values.get("17")),
+                "low": _to_abs_float(raw_values.get("18")),
+                "change_sign": str(raw_values.get("25") or "").strip(),
+                "trade_strength": _to_float(raw_values.get("228")),
+                "market_cap_100m_krw": _to_float(raw_values.get("311")),
+                "session_code": str(raw_values.get("290") or "").strip(),
+                "exchange_code": str(raw_values.get("9081") or "").strip(),
+                "raw_values": raw_values,
+                "raw": dict(item),
+            }
+        )
+    return ticks
+
+
+def parse_websocket_best_quotes(message: Mapping[str, Any]) -> list[dict[str, Any]]:
+    trnm = str(message.get("trnm") or "").strip().upper()
+    if trnm != "REAL":
+        raise KoreanConnectorConfigError(f"Kiwoom WebSocket best quote parser expected REAL, got {trnm or 'missing'}.")
+
+    data = message.get("data")
+    if isinstance(data, Mapping):
+        rows = [dict(data)]
+    elif isinstance(data, list):
+        if any(not isinstance(item, Mapping) for item in data):
+            raise KoreanConnectorConfigError("Kiwoom WebSocket best quote requires data mappings.")
+        rows = [dict(item) for item in data]
+    else:
+        raise KoreanConnectorConfigError("Kiwoom WebSocket best quote requires data mapping or list.")
+
+    quotes = []
+    for item in rows:
+        real_type = str(item.get("type") or "").strip()
+        if real_type != "0C":
+            raise KoreanConnectorConfigError(f"Kiwoom WebSocket best quote parser expected type 0C, got {real_type or 'missing'}.")
+        values = item.get("values")
+        if not isinstance(values, Mapping):
+            raise KoreanConnectorConfigError("Kiwoom WebSocket best quote requires values mapping.")
+        raw_values = {str(key): value for key, value in values.items()}
+        quotes.append(
+            {
+                "type": real_type,
+                "name": str(item.get("name") or KIWOOM_WEBSOCKET_REALTIME_TYPES["0C"]).strip(),
+                "symbol": _normalize_position_symbol(item.get("item")),
+                "best_ask": _to_abs_float(raw_values.get("27")),
+                "best_bid": _to_abs_float(raw_values.get("28")),
+                "raw_values": raw_values,
+                "raw": dict(item),
+            }
+        )
+    return quotes
 
 
 def get_account_snapshot(
@@ -630,6 +1010,46 @@ def _to_float(value: Any) -> float | None:
         return float(str(value).replace(",", "").replace("+", ""))
     except (TypeError, ValueError):
         return None
+
+
+def _to_abs_float(value: Any) -> float | None:
+    parsed = _to_float(value)
+    return abs(parsed) if parsed is not None else None
+
+
+def _orderbook_level(values: Mapping[str, Any], level: int, *, side: str) -> dict[str, Any]:
+    if side == "ask":
+        price_fid = str(40 + level)
+        quantity_fid = str(60 + level)
+        change_fid = str(80 + level)
+        lp_fid = str(620 + level)
+        krx_fid = str(6043 + level)
+        nxt_fid = str(6065 + level)
+    else:
+        price_fid = str(50 + level)
+        quantity_fid = str(70 + level)
+        change_fid = str(90 + level)
+        lp_fid = str(630 + level)
+        krx_fid = str(6053 + level)
+        nxt_fid = str(6075 + level)
+    return {
+        "level": level,
+        "price": _to_abs_float(values.get(price_fid)),
+        "quantity": _to_float(values.get(quantity_fid)),
+        "change": _to_float(values.get(change_fid)),
+        "krx_quantity": _to_float(values.get(krx_fid)),
+        "nxt_quantity": _to_float(values.get(nxt_fid)),
+        "lp_quantity": _to_float(values.get(lp_fid)),
+    }
+
+
+def _signed_volume_side(value: Any) -> str | None:
+    token = str(value or "").strip()
+    if token.startswith("+"):
+        return "buy"
+    if token.startswith("-"):
+        return "sell"
+    return None
 
 
 def _numeric_string(value: float | int | str) -> str:
