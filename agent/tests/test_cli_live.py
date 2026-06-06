@@ -138,6 +138,44 @@ class TestConnectorLiveDispatch:
             include_trade_profiles=False,
             allow_broker_calls=False,
             allow_live=False,
+            output_path=None,
+        )
+
+    def test_smoke_routes_output_path(self, tmp_path: Path) -> None:
+        output_path = tmp_path / "evidence" / "kr-broker-smoke.json"
+        with patch("cli._legacy.cmd_connector_smoke", return_value=0) as m:
+            self._dispatch(["connector", "smoke", "--profile", "kis-paper-sdk", "--output", str(output_path)])
+        m.assert_called_once_with(
+            profile_ids=["kis-paper-sdk"],
+            operations=None,
+            symbol="005930",
+            include_trade_profiles=False,
+            allow_broker_calls=False,
+            allow_live=False,
+            output_path=output_path,
+        )
+
+    def test_smoke_audit_routes_evidence_path(self, tmp_path: Path) -> None:
+        evidence_path = tmp_path / "evidence" / "kr-broker-smoke.json"
+        output_path = tmp_path / "audit" / "kr-broker-smoke-audit.json"
+        with patch("cli._legacy.cmd_connector_smoke_audit", return_value=0) as m:
+            self._dispatch(
+                [
+                    "connector",
+                    "smoke-audit",
+                    "--evidence",
+                    str(evidence_path),
+                    "--require-broker-calls",
+                    "--json",
+                    "--output",
+                    str(output_path),
+                ]
+            )
+        m.assert_called_once_with(
+            evidence_path=evidence_path,
+            require_broker_calls=True,
+            json_mode=True,
+            output_path=output_path,
         )
 
     def test_smoke_requires_explicit_flags_for_broker_and_live_calls(self) -> None:
@@ -161,6 +199,7 @@ class TestConnectorLiveDispatch:
             include_trade_profiles=False,
             allow_broker_calls=True,
             allow_live=True,
+            output_path=None,
         )
 
     def test_no_subcommand_is_usage_error(self) -> None:
@@ -175,6 +214,164 @@ class TestConnectorLiveDispatch:
         parser = _build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["connector", "commit", "robinhood-live-mcp"])
+
+
+def test_connector_smoke_writes_evidence_file(tmp_path: Path) -> None:
+    from cli._legacy import EXIT_SUCCESS, cmd_connector_smoke
+
+    output_path = tmp_path / "nested" / "kr-broker-smoke.json"
+    result = {
+        "status": "not_run",
+        "profiles": [{"profile_id": "kis-paper-sdk", "status": "not_run"}],
+    }
+    with patch("src.trading.kr_smoke.run_smoke", return_value=result):
+        assert cmd_connector_smoke(output_path=output_path) == EXIT_SUCCESS
+
+    assert json.loads(output_path.read_text(encoding="utf-8")) == result
+    assert output_path.stat().st_mode & 0o777 == 0o600
+
+
+def _write_smoke_evidence(tmp_path: Path, payload: dict[str, Any]) -> Path:
+    evidence_path = tmp_path / "kr-broker-smoke.json"
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+    return evidence_path
+
+
+def test_connector_smoke_audit_accepts_plan_only_evidence_without_call_requirement(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli._legacy import EXIT_SUCCESS, cmd_connector_smoke_audit
+
+    evidence_path = _write_smoke_evidence(
+        tmp_path,
+        {
+            "status": "not_run",
+            "profiles": [{"profile_id": "kis-paper-sdk", "status": "not_run", "steps": []}],
+        },
+    )
+
+    assert cmd_connector_smoke_audit(evidence_path=evidence_path, json_mode=True) == EXIT_SUCCESS
+
+    audit = json.loads(capsys.readouterr().out)
+    assert audit["status"] == "ok"
+    assert audit["smoke_status"] == "not_run"
+    assert audit["broker_calls_proven"] is False
+    assert audit["profile_count"] == 1
+
+
+def test_connector_smoke_audit_fails_when_broker_calls_are_required_but_not_proven(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli._legacy import EXIT_RUN_FAILED, cmd_connector_smoke_audit
+
+    evidence_path = _write_smoke_evidence(
+        tmp_path,
+        {
+            "status": "not_run",
+            "profiles": [{"profile_id": "kis-paper-sdk", "status": "not_run", "steps": []}],
+        },
+    )
+
+    assert (
+        cmd_connector_smoke_audit(
+            evidence_path=evidence_path,
+            require_broker_calls=True,
+            json_mode=True,
+        )
+        == EXIT_RUN_FAILED
+    )
+
+    audit = json.loads(capsys.readouterr().out)
+    assert audit["status"] == "failed"
+    assert audit["reason"] == "broker_calls_not_proven"
+    assert audit["broker_calls_proven"] is False
+
+
+def test_connector_smoke_audit_accepts_credentialed_step_evidence(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli._legacy import EXIT_SUCCESS, cmd_connector_smoke_audit
+
+    evidence_path = _write_smoke_evidence(
+        tmp_path,
+        {
+            "status": "ok",
+            "profiles": [
+                {
+                    "profile_id": "kis-paper-sdk",
+                    "status": "ok",
+                    "steps": [{"operation": "check", "status": "ok"}],
+                }
+            ],
+        },
+    )
+
+    assert (
+        cmd_connector_smoke_audit(
+            evidence_path=evidence_path,
+            require_broker_calls=True,
+            json_mode=True,
+        )
+        == EXIT_SUCCESS
+    )
+
+    audit = json.loads(capsys.readouterr().out)
+    assert audit["status"] == "ok"
+    assert audit["broker_calls_proven"] is True
+    assert audit["step_count"] == 1
+
+
+def test_connector_smoke_audit_rejects_secret_markers_in_evidence(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli._legacy import EXIT_RUN_FAILED, cmd_connector_smoke_audit
+
+    evidence_path = _write_smoke_evidence(
+        tmp_path,
+        {
+            "status": "ok",
+            "profiles": [{"profile_id": "kis-paper-sdk", "status": "ok", "steps": []}],
+            "access_token": "should-not-be-in-evidence",
+        },
+    )
+
+    assert cmd_connector_smoke_audit(evidence_path=evidence_path, json_mode=True) == EXIT_RUN_FAILED
+
+    audit = json.loads(capsys.readouterr().out)
+    assert audit["status"] == "failed"
+    assert audit["reason"] == "secret_marker_detected"
+    assert audit["secret_markers"] == ["access_token"]
+
+
+def test_connector_smoke_audit_writes_private_audit_report(tmp_path: Path) -> None:
+    from cli._legacy import EXIT_SUCCESS, cmd_connector_smoke_audit
+
+    evidence_path = _write_smoke_evidence(
+        tmp_path,
+        {
+            "status": "not_run",
+            "profiles": [{"profile_id": "kis-paper-sdk", "status": "not_run", "steps": []}],
+        },
+    )
+    output_path = tmp_path / "nested" / "kr-broker-smoke-audit.json"
+
+    assert (
+        cmd_connector_smoke_audit(
+            evidence_path=evidence_path,
+            output_path=output_path,
+        )
+        == EXIT_SUCCESS
+    )
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "ok"
+    assert payload["smoke_status"] == "not_run"
+    assert payload["broker_calls_proven"] is False
+    assert output_path.stat().st_mode & 0o777 == 0o600
 
 
 # ---------------------------------------------------------------------------

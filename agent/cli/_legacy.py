@@ -3702,6 +3702,7 @@ def cmd_connector_smoke(
     include_trade_profiles: bool = False,
     allow_broker_calls: bool = False,
     allow_live: bool = False,
+    output_path: Optional[Path] = None,
 ) -> int:
     """Plan or run credential-gated Korean broker smoke checks."""
     from src.trading import kr_smoke
@@ -3719,10 +3720,160 @@ def cmd_connector_smoke(
         console.print(f"[red]Korean connector smoke failed:[/red] {rich_escape(str(exc))}")
         return EXIT_RUN_FAILED
 
+    if output_path is not None:
+        _write_connector_smoke_output(result, output_path)
     console.print_json(data=result)
     if result.get("status") in {"ok", "not_run", "blocked", "planned"}:
         return EXIT_SUCCESS
     return EXIT_RUN_FAILED
+
+
+def _write_connector_smoke_output(payload: dict[str, Any], output_path: Path) -> None:
+    """Write Korean broker smoke evidence JSON with private file permissions."""
+    output_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    output_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    try:
+        output_path.chmod(0o600)
+    except OSError:
+        pass
+
+
+_CONNECTOR_SMOKE_SECRET_MARKERS = (
+    "access_token",
+    "api_key",
+    "api_secret",
+    "app_secret",
+    "appkey",
+    "authorization",
+    "password",
+    "refresh_token",
+    "secret",
+    "token",
+)
+
+
+def cmd_connector_smoke_audit(
+    *,
+    evidence_path: Path,
+    require_broker_calls: bool = False,
+    json_mode: bool = False,
+    output_path: Optional[Path] = None,
+) -> int:
+    """Audit saved Korean broker smoke evidence without touching broker APIs."""
+    result = _audit_connector_smoke_evidence(
+        evidence_path=evidence_path,
+        require_broker_calls=require_broker_calls,
+    )
+    if output_path is not None:
+        _write_connector_smoke_output(result, output_path)
+    console.print_json(data=result)
+    if not json_mode and output_path is not None:
+        console.print(f"[dim]Wrote smoke audit: {output_path}[/dim]")
+    return EXIT_SUCCESS if result.get("status") == "ok" else EXIT_RUN_FAILED
+
+
+def _audit_connector_smoke_evidence(
+    *,
+    evidence_path: Path,
+    require_broker_calls: bool,
+) -> dict[str, Any]:
+    try:
+        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {
+            "status": "failed",
+            "reason": "evidence_not_found",
+            "evidence": str(evidence_path),
+        }
+    except json.JSONDecodeError as exc:
+        return {
+            "status": "failed",
+            "reason": "invalid_json",
+            "evidence": str(evidence_path),
+            "detail": str(exc),
+        }
+
+    if not isinstance(payload, dict):
+        return {
+            "status": "failed",
+            "reason": "invalid_evidence_shape",
+            "evidence": str(evidence_path),
+        }
+
+    secret_markers = _connector_smoke_secret_markers(payload)
+    profiles = payload.get("profiles")
+    if secret_markers:
+        return {
+            "status": "failed",
+            "reason": "secret_marker_detected",
+            "evidence": str(evidence_path),
+            "smoke_status": payload.get("status"),
+            "secret_markers": secret_markers,
+        }
+    if not isinstance(profiles, list):
+        return {
+            "status": "failed",
+            "reason": "profiles_missing_or_invalid",
+            "evidence": str(evidence_path),
+            "smoke_status": payload.get("status"),
+        }
+
+    step_count = _connector_smoke_step_count(profiles)
+    broker_calls_proven = step_count > 0
+    result = {
+        "status": "ok",
+        "reason": "validated",
+        "evidence": str(evidence_path),
+        "smoke_status": payload.get("status"),
+        "profile_count": len(profiles),
+        "step_count": step_count,
+        "broker_calls_proven": broker_calls_proven,
+        "secret_markers": [],
+    }
+    if require_broker_calls and not broker_calls_proven:
+        result["status"] = "failed"
+        result["reason"] = "broker_calls_not_proven"
+    return result
+
+
+def _connector_smoke_step_count(profiles: list[Any]) -> int:
+    total = 0
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        steps = profile.get("steps")
+        if not isinstance(steps, list):
+            continue
+        total += sum(1 for step in steps if _connector_smoke_step_proves_call(step))
+    return total
+
+
+def _connector_smoke_step_proves_call(step: Any) -> bool:
+    if not isinstance(step, dict):
+        return False
+    operation = str(step.get("operation") or "").strip()
+    status = str(step.get("status") or "").strip()
+    return bool(operation and status)
+
+
+def _connector_smoke_secret_markers(value: Any, *, prefix: str = "") -> list[str]:
+    hits: list[str] = []
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            key_text = str(key)
+            path = f"{prefix}.{key_text}" if prefix else key_text
+            normalized = key_text.lower().replace("-", "_")
+            if any(marker in normalized for marker in _CONNECTOR_SMOKE_SECRET_MARKERS):
+                hits.append(path)
+            hits.extend(_connector_smoke_secret_markers(nested, prefix=path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            path = f"{prefix}[{index}]" if prefix else f"[{index}]"
+            hits.extend(_connector_smoke_secret_markers(item, prefix=path))
+    return sorted(dict.fromkeys(hits))
 
 
 def _live_profile_connector(
@@ -3898,6 +4049,14 @@ def _dispatch_connector(args: argparse.Namespace) -> int:
             include_trade_profiles=args.include_trade_profiles,
             allow_broker_calls=args.allow_broker_calls,
             allow_live=args.allow_live,
+            output_path=args.output,
+        )
+    if sub == "smoke-audit":
+        return cmd_connector_smoke_audit(
+            evidence_path=args.evidence,
+            require_broker_calls=args.require_broker_calls,
+            json_mode=args.json_output,
+            output_path=args.output,
         )
     if sub == "authorize":
         return cmd_connector_authorize(args.profile)
@@ -4371,6 +4530,20 @@ def _build_parser() -> argparse.ArgumentParser:
     connector_smoke.add_argument("--include-trade-profiles", action="store_true", help="Include trade-capable profiles in read-only smoke planning")
     connector_smoke.add_argument("--allow-broker-calls", action="store_true", help="Actually call read-only broker APIs")
     connector_smoke.add_argument("--allow-live", action="store_true", help="Allow live profile checks in addition to --allow-broker-calls")
+    connector_smoke.add_argument("--output", type=Path, help="Write Korean broker smoke JSON evidence")
+
+    connector_smoke_audit = connector_subparsers.add_parser(
+        "smoke-audit",
+        help="Audit saved Korean broker smoke JSON evidence",
+    )
+    connector_smoke_audit.add_argument("--evidence", type=Path, required=True, help="Korean broker smoke JSON evidence")
+    connector_smoke_audit.add_argument(
+        "--require-broker-calls",
+        action="store_true",
+        help="Fail unless the evidence proves credentialed broker smoke steps ran",
+    )
+    connector_smoke_audit.add_argument("--json", dest="json_output", action="store_true", help="Print JSON audit output")
+    connector_smoke_audit.add_argument("--output", type=Path, help="Write Korean broker smoke audit JSON evidence")
 
     for name, help_text in (
         ("start", "Start the selected live connector runner"),
