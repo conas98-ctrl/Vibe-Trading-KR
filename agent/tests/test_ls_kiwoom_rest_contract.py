@@ -7,10 +7,12 @@ use fake clients so they do not require live credentials or network calls.
 
 from __future__ import annotations
 
+import json
 from urllib.parse import urlparse
 
 import pytest
 
+from src.tools.trading_connector_tool import TradingLsWebSocketChannelsTool
 from src.trading.connectors.kiwoom import sdk as kiwoom
 from src.trading.connectors.kr_common import KoreanConnectorConfig
 from src.trading.connectors.ls import sdk as ls
@@ -195,6 +197,23 @@ def test_ls_websocket_catalog_matches_official_openapi_guide() -> None:
     assert ls.LS_WEBSOCKET_CHANNELS["kospi_trade"]["tr_cd"] == "S3_"
     assert ls.LS_WEBSOCKET_CHANNELS["kosdaq_orderbook"]["tr_cd"] == "HA_"
     assert ls.LS_WEBSOCKET_CHANNELS["stock_order_accept"]["tr_type"] == "1"
+
+
+def test_ls_websocket_channel_catalog_tool_is_readonly_offline() -> None:
+    tool = TradingLsWebSocketChannelsTool()
+    payload = json.loads(tool.execute())
+
+    assert tool.is_readonly is True
+    assert tool.repeatable is True
+    assert payload["status"] == "ok"
+    assert payload["broker"] == "ls"
+    assert payload["network"] == "not_attempted"
+    assert payload["endpoint"]["path"] == "/websocket/stock"
+    assert payload["tr_count"] == 65
+    assert payload["channels"]["kospi_trade"]["tr_cd"] == "S3_"
+    assert payload["channels"]["kospi_trade"]["description"] == "KOSPI체결"
+    assert payload["channels"]["stock_order_execution"]["tr_type"] == "1"
+    assert payload["trs"]["NS3"] == "(NXT)체결"
 
 
 def test_ls_websocket_url_and_subscribe_message_shape() -> None:

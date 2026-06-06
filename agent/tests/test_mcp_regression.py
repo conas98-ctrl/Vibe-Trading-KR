@@ -180,6 +180,7 @@ def test_mcp_server_exposes_well_known_tool_names() -> None:
         "trading_kiwoom_websocket_channels",
         "trading_kis_websocket_smoke",
         "trading_kis_websocket_channels",
+        "trading_ls_websocket_channels",
     }
     missing = expected - registered
     assert not missing, (
@@ -438,3 +439,16 @@ def test_trading_kis_websocket_channels_mcp_wrapper_is_readonly_catalog(
     mod.trading_kis_websocket_channels()
 
     assert registry.calls == [("trading_kis_websocket_channels", {})]
+
+
+def test_trading_ls_websocket_channels_mcp_wrapper_is_readonly_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LS WebSocket channel catalog MCP calls should not send broker-call args."""
+    mod = _import_mcp_server()
+    registry = _RecordingRegistry()
+    monkeypatch.setattr(mod, "_get_registry", lambda: registry)
+
+    mod.trading_ls_websocket_channels()
+
+    assert registry.calls == [("trading_ls_websocket_channels", {})]

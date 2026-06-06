@@ -4077,6 +4077,22 @@ def cmd_connector_revoke(profile_id: Optional[str]) -> int:
     return cmd_live_revoke(broker)
 
 
+def cmd_connector_ls_websocket_channels() -> int:
+    """Print the local LS WebSocket channel catalog without broker calls."""
+    from src.tools.trading_connector_tool import TradingLsWebSocketChannelsTool
+
+    try:
+        result = json.loads(TradingLsWebSocketChannelsTool().execute())
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]LS WebSocket channel catalog failed:[/red] {rich_escape(str(exc))}")
+        return EXIT_RUN_FAILED
+
+    console.print_json(data=result)
+    if result.get("status") == "ok":
+        return EXIT_SUCCESS
+    return EXIT_RUN_FAILED
+
+
 def _dispatch_connector(args: argparse.Namespace) -> int:
     """Route parsed ``connector`` subcommands."""
     sub = getattr(args, "connector_command", None)
@@ -4209,6 +4225,8 @@ def _dispatch_connector(args: argparse.Namespace) -> int:
         )
     if sub == "kiwoom-websocket-channels":
         return cmd_connector_kiwoom_websocket_channels()
+    if sub == "ls-websocket-channels":
+        return cmd_connector_ls_websocket_channels()
     if sub == "authorize":
         return cmd_connector_authorize(args.profile)
     if sub == "status":
@@ -4761,6 +4779,11 @@ def _build_parser() -> argparse.ArgumentParser:
     connector_kis_ws_smoke.add_argument("--max-samples", type=int, default=3)
     connector_kis_ws_smoke.add_argument("--allow-broker-calls", action="store_true", help="Actually call read-only KIS WebSocket APIs")
     connector_kis_ws_smoke.add_argument("--allow-live", action="store_true", help="Allow live KIS profile checks in addition to --allow-broker-calls")
+
+    connector_subparsers.add_parser(
+        "ls-websocket-channels",
+        help="List supported LS WebSocket channels without broker calls",
+    )
 
     for name, help_text in (
         ("start", "Start the selected live connector runner"),

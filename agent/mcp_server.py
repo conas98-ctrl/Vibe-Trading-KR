@@ -676,6 +676,19 @@ def trading_select_connection(connection: str) -> str:
 
 
 @mcp.tool
+def trading_ls_websocket_channels() -> str:
+    """List supported LS WebSocket channels without broker calls.
+
+    Returns the local LS OpenAPI stock WebSocket catalog, including WebSocket
+    URLs, endpoint metadata, TR descriptions, channel shortcut metadata, and
+    a ``network=not_attempted`` marker. It does not request tokens, open
+    sockets, or write evidence.
+    """
+    registry = _get_registry()
+    return registry.execute("trading_ls_websocket_channels", {})
+
+
+@mcp.tool
 def trading_check(
     connection: str | None = None,
     host: str | None = None,

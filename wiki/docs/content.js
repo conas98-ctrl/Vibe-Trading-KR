@@ -584,6 +584,65 @@ vibe-trading --swarm-run investment_committee '{"topic":"BTC outlook"}'</code></
         ]
       },
       {
+        id: "tools/ls-websocket-channel-catalog",
+        title: "LS WebSocket Channel Catalog",
+        description: "LS OpenAPI 국내주식 WebSocket endpoint, TR, shortcut channel metadata를 broker call 없이 확인합니다.",
+        lead: "LS channel catalog는 token issuance, WebSocket 연결, evidence 파일 없이 로컬 metadata만 보여주는 읽기 전용 operator surface입니다.",
+        sections: [
+          {
+            id: "why",
+            title: "왜 먼저 확인하나요",
+            body: `
+              <p>LS WebSocket smoke나 subscribe 구현을 실제로 실행하기 전에는 어떤 shortcut channel이 어떤 TR code, TR type, key 종류를 요구하는지 먼저 고정해야 합니다. 이 catalog command는 그 mapping을 로컬에서만 출력하므로 CI, 리뷰, 문서 확인 환경에서도 안전하게 실행할 수 있습니다.</p>
+              <ul>
+                <li><code>network=not_attempted</code>가 정상 결과입니다.</li>
+                <li>LS app key, app secret, access token, 계좌번호를 요구하지 않습니다.</li>
+                <li>socket을 열지 않고, evidence 파일도 만들지 않습니다.</li>
+              </ul>
+            `
+          },
+          {
+            id: "cli",
+            title: "CLI",
+            body: `
+              <p>로컬 CLI에서는 다음 명령으로 LS OpenAPI stock WebSocket catalog를 JSON으로 확인합니다.</p>
+              <pre><code>vibe-trading connector ls-websocket-channels</code></pre>
+              <p>대표 shortcut은 KOSPI 체결 <code>kospi_trade</code> / <code>S3_</code>, KOSDAQ 호가 <code>kosdaq_orderbook</code> / <code>HA_</code>, NXT 체결 <code>nxt_trade</code> / <code>NS3</code>, 주문체결 <code>stock_order_execution</code> / <code>SC1</code>입니다.</p>
+            `
+          },
+          {
+            id: "agent-tool",
+            title: "Local agent tool",
+            body: `
+              <p>Agent tool surface에서는 같은 catalog를 <code>trading_ls_websocket_channels</code>로 조회합니다. 결과는 endpoint metadata, 65개 stock WebSocket TR 설명, 13개 shortcut channel, 그리고 broker call을 하지 않았다는 marker를 포함합니다.</p>
+              <pre><code>{
+  "status": "ok",
+  "broker": "ls",
+  "network": "not_attempted",
+  "endpoint": {"path": "/websocket/stock"},
+  "tr_count": 65,
+  "channel_count": 13
+}</code></pre>
+            `
+          },
+          {
+            id: "handoff",
+            title: "Credentialed smoke로 넘기기",
+            body: `
+              <p>catalog에서 channel과 key 종류를 확인한 뒤 credentialed smoke나 subscribe implementation에 넘깁니다. Symbol 기반 채널은 종목코드가 필요하고, order event 채널은 계좌 기반 key가 필요합니다.</p>
+              <p>실제 LS token issuance, WebSocket connect, frame 수신, evidence 파일 저장은 별도 opt-in smoke path가 생기기 전까지 이 command에서 수행하지 않습니다.</p>
+            `
+          },
+          {
+            id: "non-claims",
+            title: "아직 claim하지 않는 것",
+            body: `
+              <p>이 page는 channel/TR metadata 확인 절차만 문서화합니다. 실제 LS WebSocket 접속, 장중 frame 수신, market data 라이선스 확인, 실전 주문 권한, live mandate proof는 credentialed smoke evidence가 생기기 전까지 완료로 claim하지 않습니다.</p>
+            `
+          }
+        ]
+      },
+      {
         id: "tools/kiwoom-websocket-channel-catalog",
         title: "Kiwoom WebSocket Channel Catalog",
         description: "키움증권 REST OpenAPI WebSocket endpoint와 control frame metadata를 broker call 없이 확인합니다.",
@@ -802,6 +861,20 @@ vibe-trading-mcp</code></pre>
   "arguments": {}
 }</code></pre>
               <p>credentialed smoke 전에 <code>ccnl_krx</code> / <code>H0STCNT0</code> 체결 채널이나 <code>ccnl_notice</code> / <code>H0STCNI0</code>, <code>H0STCNI9</code> 체결통보 채널을 고르는 기준으로 사용하세요.</p>
+            `
+          },
+          {
+            id: "ls-websocket-channel-catalog",
+            title: "LS WebSocket channel catalog",
+            body: `
+              <p>한국시장 확장에서는 MCP tool <code>trading_ls_websocket_channels</code>로 LS OpenAPI 국내주식 WebSocket endpoint, TR, shortcut channel 카탈로그를 읽기 전용으로 확인할 수 있습니다.</p>
+              <p>이 tool은 로컬 메타데이터만 반환하며 <code>network=not_attempted</code> 상태로 LS access token 요청, WebSocket 연결, evidence 파일 쓰기를 하지 않습니다.</p>
+              <pre><code>{
+  "tool": "trading_ls_websocket_channels",
+  "arguments": {}
+}</code></pre>
+              <p>credentialed smoke 전에 <code>kospi_trade</code> / <code>S3_</code> 체결 채널, <code>kosdaq_orderbook</code> / <code>HA_</code> 호가 채널, <code>stock_order_execution</code> / <code>SC1</code> 주문체결 채널을 고르는 기준으로 사용하세요.</p>
+              <p>실제 LS WebSocket 접속, 장중 frame 수신, market data 라이선스 확인, 실전 주문 권한, live mandate proof는 별도 credentialed evidence가 생기기 전까지 완료로 claim하지 않습니다.</p>
             `
           }
         ]

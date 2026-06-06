@@ -358,6 +358,12 @@ class TestConnectorLiveDispatch:
                 ]
             )
 
+    def test_ls_websocket_channels_routes_to_handler(self) -> None:
+        with patch("cli._legacy.cmd_connector_ls_websocket_channels", return_value=0) as m:
+            assert self._dispatch(["connector", "ls-websocket-channels"]) == 0
+
+        m.assert_called_once_with()
+
     def test_no_subcommand_is_usage_error(self) -> None:
         from cli._legacy import EXIT_USAGE_ERROR
 
@@ -859,6 +865,26 @@ class TestLiveRevoke:
 
         with patch("cli._legacy._live_server_config", return_value=None):
             assert cmd_live_revoke("robinhood") == 0
+
+
+# ---------------------------------------------------------------------------
+# LS WebSocket channel catalog (offline/read-only)
+# ---------------------------------------------------------------------------
+
+
+class TestLsWebSocketChannelsCli:
+    def test_command_prints_offline_catalog(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from cli._legacy import EXIT_SUCCESS, cmd_connector_ls_websocket_channels
+
+        assert cmd_connector_ls_websocket_channels() == EXIT_SUCCESS
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["status"] == "ok"
+        assert payload["broker"] == "ls"
+        assert payload["network"] == "not_attempted"
+        assert payload["endpoint"]["path"] == "/websocket/stock"
+        assert payload["channels"]["kospi_trade"]["tr_cd"] == "S3_"
+        assert payload["channels"]["stock_order_execution"]["tr_type"] == "1"
 
 
 # ---------------------------------------------------------------------------

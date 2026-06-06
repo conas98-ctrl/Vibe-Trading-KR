@@ -12,6 +12,12 @@ from typing import Any
 from src.agent.tools import BaseTool
 from src.trading.connectors.kiwoom.sdk import KIWOOM_WEBSOCKET_ENDPOINTS
 from src.trading.connectors.kis.sdk import KIS_WEBSOCKET_CHANNELS
+from src.trading.connectors.ls.sdk import (
+    LS_STOCK_WEBSOCKET_TRS,
+    LS_WEBSOCKET_CHANNELS,
+    LS_WEBSOCKET_ENDPOINTS,
+    LS_WEBSOCKET_URLS,
+)
 from src.trading.profiles import (
     list_profiles,
     load_selected_profile_id,
@@ -184,6 +190,46 @@ class TradingSelectConnectionTool(BaseTool):
             profile = profile_by_id(str(kwargs["connection"]).strip())
             path = save_selected_profile_id(profile.id)
             return _json_result({"status": "ok", "selected_profile": profile.id, "path": str(path)})
+        except Exception as exc:  # noqa: BLE001
+            return _json_result({"status": "error", "error": str(exc)})
+
+
+class TradingLsWebSocketChannelsTool(BaseTool):
+    """List supported LS WebSocket channels without broker calls."""
+
+    name = "trading_ls_websocket_channels"
+    description = (
+        "List the supported LS OpenAPI stock WebSocket channel catalog. "
+        "Offline/read-only: does not request tokens, open sockets, or write evidence."
+    )
+    parameters = {"type": "object", "properties": {}, "required": []}
+    repeatable = True
+    is_readonly = True
+
+    def execute(self, **_: Any) -> str:
+        """Return the local LS WebSocket channel catalog."""
+        try:
+            channels = {
+                channel: {
+                    "channel": channel,
+                    **dict(spec),
+                    "description": LS_STOCK_WEBSOCKET_TRS.get(spec["tr_cd"], ""),
+                }
+                for channel, spec in sorted(LS_WEBSOCKET_CHANNELS.items())
+            }
+            return _json_result(
+                {
+                    "status": "ok",
+                    "broker": "ls",
+                    "network": "not_attempted",
+                    "websocket_urls": dict(LS_WEBSOCKET_URLS),
+                    "endpoint": dict(LS_WEBSOCKET_ENDPOINTS["stock_realtime"]),
+                    "tr_count": len(LS_STOCK_WEBSOCKET_TRS),
+                    "channel_count": len(channels),
+                    "trs": dict(sorted(LS_STOCK_WEBSOCKET_TRS.items())),
+                    "channels": channels,
+                }
+            )
         except Exception as exc:  # noqa: BLE001
             return _json_result({"status": "error", "error": str(exc)})
 
