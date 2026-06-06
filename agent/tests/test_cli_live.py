@@ -128,6 +128,41 @@ class TestConnectorLiveDispatch:
             self._dispatch(["connector", "revoke", "robinhood-live-mcp"])
         m.assert_called_once_with("robinhood-live-mcp")
 
+    def test_smoke_routes_with_safe_defaults(self) -> None:
+        with patch("cli._legacy.cmd_connector_smoke", return_value=0) as m:
+            self._dispatch(["connector", "smoke", "--profile", "kis-paper-sdk", "--operation", "check"])
+        m.assert_called_once_with(
+            profile_ids=["kis-paper-sdk"],
+            operations=["check"],
+            symbol="005930",
+            include_trade_profiles=False,
+            allow_broker_calls=False,
+            allow_live=False,
+        )
+
+    def test_smoke_requires_explicit_flags_for_broker_and_live_calls(self) -> None:
+        with patch("cli._legacy.cmd_connector_smoke", return_value=0) as m:
+            self._dispatch(
+                [
+                    "connector",
+                    "smoke",
+                    "--profile",
+                    "kis-live-sdk-readonly",
+                    "--operation",
+                    "check",
+                    "--allow-broker-calls",
+                    "--allow-live",
+                ]
+            )
+        m.assert_called_once_with(
+            profile_ids=["kis-live-sdk-readonly"],
+            operations=["check"],
+            symbol="005930",
+            include_trade_profiles=False,
+            allow_broker_calls=True,
+            allow_live=True,
+        )
+
     def test_no_subcommand_is_usage_error(self) -> None:
         from cli._legacy import EXIT_USAGE_ERROR
 

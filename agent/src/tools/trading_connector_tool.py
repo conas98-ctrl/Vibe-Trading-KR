@@ -51,6 +51,23 @@ def _num_or_none(value: Any) -> float | None:
     return float(value)
 
 
+def _bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _str_list_or_none(value: Any) -> list[str] | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        items = value.split(",")
+    else:
+        items = list(value)
+    normalized = [str(item).strip() for item in items if str(item).strip()]
+    return normalized or None
+
+
 TRADING_COMMON_PARAMETERS = {
     "connection": {
         "type": "string",
@@ -303,6 +320,73 @@ class TradingHistoryTool(BaseTool):
                     **_overrides(kwargs),
                 )
             )
+        except Exception as exc:  # noqa: BLE001
+            return _json_result({"status": "error", "error": str(exc)})
+
+
+class TradingKoreanSmokeTool(BaseTool):
+    """Plan or run explicit read-only Korean broker credential smoke checks."""
+
+    name = "trading_kr_smoke"
+    description = (
+        "Plan or run Korean broker credential smoke checks. Defaults to plan-only "
+        "not_run mode; set allow_broker_calls=true to call read-only broker APIs, "
+        "and allow_live=true for live profiles. Never places or cancels orders."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "profile_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional Korean trading profile ids, e.g. kis-paper-sdk.",
+            },
+            "operations": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["check", "account", "positions", "orders", "quote", "history"],
+                },
+                "description": "Read-only smoke operations. Defaults to check and quote.",
+            },
+            "symbol": {"type": "string", "default": "005930", "description": "Korean equity symbol for quote/history checks."},
+            "include_trade_profiles": {
+                "type": "boolean",
+                "default": False,
+                "description": "Include trade-capable profiles in read-only smoke planning.",
+            },
+            "allow_broker_calls": {
+                "type": "boolean",
+                "default": False,
+                "description": "Required before the smoke runner calls any broker API.",
+            },
+            "allow_live": {
+                "type": "boolean",
+                "default": False,
+                "description": "Required in addition to allow_broker_calls before live profile checks run.",
+            },
+        },
+        "required": [],
+    }
+    repeatable = True
+    is_readonly = True
+
+    def execute(self, **kwargs: Any) -> str:
+        """Plan or execute the gated Korean broker smoke runner."""
+        try:
+            from src.trading import kr_smoke
+
+            operations = _str_list_or_none(kwargs.get("operations"))
+            run_kwargs: dict[str, Any] = {
+                "profile_ids": _str_list_or_none(kwargs.get("profile_ids")),
+                "symbol": str(kwargs.get("symbol") or kr_smoke.DEFAULT_SYMBOL),
+                "include_trade_profiles": _bool(kwargs.get("include_trade_profiles", False)),
+                "allow_broker_calls": _bool(kwargs.get("allow_broker_calls", False)),
+                "allow_live": _bool(kwargs.get("allow_live", False)),
+            }
+            if operations is not None:
+                run_kwargs["operations"] = operations
+            return _json_result(kr_smoke.run_smoke(**run_kwargs))
         except Exception as exc:  # noqa: BLE001
             return _json_result({"status": "error", "error": str(exc)})
 

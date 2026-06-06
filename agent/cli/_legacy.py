@@ -3694,6 +3694,37 @@ def cmd_connector_history(
     return EXIT_SUCCESS
 
 
+def cmd_connector_smoke(
+    *,
+    profile_ids: list[str] | None = None,
+    operations: list[str] | None = None,
+    symbol: str = "005930",
+    include_trade_profiles: bool = False,
+    allow_broker_calls: bool = False,
+    allow_live: bool = False,
+) -> int:
+    """Plan or run credential-gated Korean broker smoke checks."""
+    from src.trading import kr_smoke
+
+    try:
+        result = kr_smoke.run_smoke(
+            profile_ids=profile_ids,
+            operations=operations or kr_smoke.DEFAULT_OPERATIONS,
+            symbol=symbol,
+            include_trade_profiles=include_trade_profiles,
+            allow_broker_calls=allow_broker_calls,
+            allow_live=allow_live,
+        )
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Korean connector smoke failed:[/red] {rich_escape(str(exc))}")
+        return EXIT_RUN_FAILED
+
+    console.print_json(data=result)
+    if result.get("status") in {"ok", "not_run", "blocked", "planned"}:
+        return EXIT_SUCCESS
+    return EXIT_RUN_FAILED
+
+
 def _live_profile_connector(
     profile_id: Optional[str],
     *,
@@ -3858,6 +3889,15 @@ def _dispatch_connector(args: argparse.Namespace) -> int:
             use_rth=not args.no_rth,
             period=args.period,
             limit=args.bar_limit,
+        )
+    if sub == "smoke":
+        return cmd_connector_smoke(
+            profile_ids=args.profile_ids,
+            operations=args.operations,
+            symbol=args.symbol,
+            include_trade_profiles=args.include_trade_profiles,
+            allow_broker_calls=args.allow_broker_calls,
+            allow_live=args.allow_live,
         )
     if sub == "authorize":
         return cmd_connector_authorize(args.profile)
@@ -4307,6 +4347,30 @@ def _build_parser() -> argparse.ArgumentParser:
     connector_history.add_argument("--no-rth", action="store_true", help="Include outside-regular-hours data when available")
     connector_history.add_argument("--period", default="1d", help="Bar interval for SDK connectors: 1m/5m/15m/30m/1h/4h/1d/1w/1M")
     connector_history.add_argument("--limit", dest="bar_limit", type=int, default=90, help="Number of bars for SDK connectors")
+
+    connector_smoke = connector_subparsers.add_parser(
+        "smoke",
+        help="Plan or run Korean broker credential smoke checks",
+    )
+    connector_smoke.add_argument(
+        "--profile",
+        dest="profile_ids",
+        action="append",
+        default=None,
+        help="Korean connector profile id to smoke; repeatable",
+    )
+    connector_smoke.add_argument(
+        "--operation",
+        dest="operations",
+        action="append",
+        default=None,
+        choices=("check", "account", "positions", "orders", "quote", "history"),
+        help="Read-only smoke operation; repeatable",
+    )
+    connector_smoke.add_argument("--symbol", default="005930", help="Korean equity symbol for quote/history smoke checks")
+    connector_smoke.add_argument("--include-trade-profiles", action="store_true", help="Include trade-capable profiles in read-only smoke planning")
+    connector_smoke.add_argument("--allow-broker-calls", action="store_true", help="Actually call read-only broker APIs")
+    connector_smoke.add_argument("--allow-live", action="store_true", help="Allow live profile checks in addition to --allow-broker-calls")
 
     for name, help_text in (
         ("start", "Start the selected live connector runner"),
