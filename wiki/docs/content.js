@@ -378,6 +378,76 @@ vibe-trading --swarm-run investment_committee '{"topic":"BTC outlook"}'</code></
         ]
       },
       {
+        id: "tools/kiwoom-websocket-channel-catalog",
+        title: "Kiwoom WebSocket Channel Catalog",
+        description: "키움증권 REST OpenAPI WebSocket endpoint와 control frame metadata를 broker call 없이 확인합니다.",
+        lead: "Kiwoom channel catalog는 access token 발급, WebSocket 연결, evidence 파일 없이 로컬 metadata만 보여주는 읽기 전용 operator surface입니다.",
+        sections: [
+          {
+            id: "why",
+            title: "왜 먼저 확인하나요",
+            body: `
+              <p>키움증권 WebSocket smoke를 실제로 실행하기 전에는 어떤 channel key가 어떤 endpoint, login frame, subscribe frame, ping frame, sample type을 요구하는지 먼저 고정해야 합니다. 이 catalog command는 그 mapping을 로컬에서만 출력하므로 CI, 리뷰, 문서 확인 환경에서도 안전하게 실행할 수 있습니다.</p>
+              <ul>
+                <li><code>network=not_attempted</code>가 정상 결과입니다.</li>
+                <li>키움 app key, secret, access token, 계좌번호를 요구하지 않습니다.</li>
+                <li>socket을 열지 않고, evidence 파일도 만들지 않습니다.</li>
+              </ul>
+            `
+          },
+          {
+            id: "cli",
+            title: "CLI",
+            body: `
+              <p>로컬 CLI에서는 다음 명령으로 키움 WebSocket channel catalog를 JSON으로 확인합니다.</p>
+              <pre><code>vibe-trading connector kiwoom-websocket-channels</code></pre>
+              <p>현재 catalog 항목은 국내주식 실시간 channel <code>domestic_stock_realtime</code>이며, endpoint는 <code>wss://api.kiwoom.com:10000/api/dostk/websocket</code>, login control frame은 <code>LOGIN</code>, subscribe frame은 <code>REG</code>, ping frame은 <code>PING</code>, sample type은 <code>0B</code>입니다.</p>
+            `
+          },
+          {
+            id: "agent-tool",
+            title: "Local agent tool",
+            body: `
+              <p>agent registry에서는 같은 catalog를 <code>trading_kiwoom_websocket_channels</code>로 조회합니다. 이 tool은 repeatable/read-only로 등록되어 있으며 인자를 받지 않습니다.</p>
+              <pre><code>{
+  "status": "ok",
+  "connector": "kiwoom",
+  "network": "not_attempted",
+  "count": 1,
+  "channels": {
+    "domestic_stock_realtime": {
+      "login_trnm": "LOGIN",
+      "subscribe_trnm": "REG",
+      "ping_trnm": "PING",
+      "sample_type": "0B"
+    }
+  }
+}</code></pre>
+            `
+          },
+          {
+            id: "handoff",
+            title: "Credentialed smoke로 넘기기",
+            body: `
+              <p>catalog에서 channel과 control frame metadata를 확인한 뒤에만 smoke command에 넘깁니다. 예를 들어 국내주식 실시간 channel은 종목 subscription symbol이 필요하므로, 테스트 fixture 예시는 <code>KRX:039490</code>처럼 전달합니다.</p>
+              <pre><code>vibe-trading connector kiwoom-websocket-smoke \\
+  --profile kiwoom-paper-sdk \\
+  --channel domestic_stock_realtime \\
+  --symbol KRX:039490 \\
+  --evidence-path ~/.vibe-trading/evidence/kiwoom-websocket-smoke-domestic-stock.json</code></pre>
+              <p>실제 broker call은 별도 <code>--allow-broker-calls</code> opt-in 없이는 실행되지 않습니다. 실전 profile은 추가로 <code>--allow-live</code>가 필요합니다.</p>
+            `
+          },
+          {
+            id: "non-claims",
+            title: "아직 claim하지 않는 것",
+            body: `
+              <p>이 page는 channel/control-frame metadata 확인 절차만 문서화합니다. 실제 키움 WebSocket 접속, 장중 frame 수신, market data 라이선스 확인, 실전 주문 권한, live mandate proof는 credentialed smoke evidence가 생기기 전까지 완료로 claim하지 않습니다.</p>
+            `
+          }
+        ]
+      },
+      {
         id: "tools/shadow-account",
         title: "Shadow Account",
         description: "Turn a broker journal into behavior diagnostics and a counterfactual strategy path.",
@@ -499,6 +569,20 @@ vibe-trading-mcp</code></pre>
             title: "Tool surface",
             body: `
               <p>The server exposes tools for skills, market data, backtesting, factor analysis, options, web/document reading, trade journals, Shadow Account, and swarm runs.</p>
+            `
+          },
+          {
+            id: "kiwoom-websocket-channel-catalog",
+            title: "Kiwoom WebSocket channel catalog",
+            body: `
+              <p>한국시장 확장에서는 MCP tool <code>trading_kiwoom_websocket_channels</code>로 키움증권 REST OpenAPI WebSocket endpoint와 control frame 카탈로그를 읽기 전용으로 확인할 수 있습니다.</p>
+              <p>이 tool은 로컬 메타데이터만 반환하며 <code>network=not_attempted</code> 상태로 키움 access token 요청, WebSocket 연결, evidence 파일 쓰기를 하지 않습니다.</p>
+              <pre><code>{
+  "tool": "trading_kiwoom_websocket_channels",
+  "arguments": {}
+}</code></pre>
+              <p>credentialed smoke 전에 <code>domestic_stock_realtime</code> channel, <code>LOGIN</code> login frame, <code>REG</code> subscribe frame, <code>PING</code> ping frame, <code>0B</code> sample type을 고르는 기준으로 사용하세요.</p>
+              <p>실제 키움 WebSocket 접속, 장중 frame 수신, market data 라이선스 확인, 실전 주문 권한, live mandate proof는 별도 credentialed evidence가 생기기 전까지 완료로 claim하지 않습니다.</p>
             `
           }
         ]

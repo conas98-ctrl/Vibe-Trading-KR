@@ -172,6 +172,34 @@ def test_kiwoom_websocket_smoke_tool_schema_exposes_supported_channels() -> None
     assert "bogus" not in channel_schema["enum"]
 
 
+def test_kiwoom_websocket_channels_tool_returns_official_catalog() -> None:
+    """Agents should inspect Kiwoom WebSocket channels without broker calls."""
+    payload = json.loads(trading_connector_tool.TradingKiwoomWebSocketChannelsTool().execute())
+
+    assert payload["status"] == "ok"
+    assert payload["connector"] == "kiwoom"
+    assert payload["network"] == "not_attempted"
+    assert payload["count"] == len(payload["channels"])
+    assert payload["channels"]["domestic_stock_realtime"] == {
+        "channel": "domestic_stock_realtime",
+        "url": "wss://api.kiwoom.com:10000/api/dostk/websocket",
+        "login_trnm": "LOGIN",
+        "subscribe_trnm": "REG",
+        "ping_trnm": "PING",
+        "sample_type": "0B",
+    }
+
+
+def test_kiwoom_websocket_channels_tool_registers_as_local_readonly_tool() -> None:
+    """The catalog tool should be available locally without broker calls."""
+    registry = build_registry(include_shell_tools=False)
+    tool = registry.get("trading_kiwoom_websocket_channels")
+
+    assert tool is not None
+    assert tool.repeatable is True
+    assert tool.is_readonly is True
+
+
 def test_live_broker_mcp_wrappers_are_hidden_from_agent_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     """Connector-first registry must not expose broker-specific mcp_* tools."""
     server = SimpleNamespace(

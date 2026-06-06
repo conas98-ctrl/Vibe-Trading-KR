@@ -177,6 +177,7 @@ def test_mcp_server_exposes_well_known_tool_names() -> None:
         "trading_quote",
         "trading_history",
         "trading_kiwoom_websocket_smoke",
+        "trading_kiwoom_websocket_channels",
     }
     missing = expected - registered
     assert not missing, (
@@ -338,3 +339,16 @@ def test_trading_kiwoom_websocket_smoke_mcp_wrapper_rejects_unknown_channel_befo
     assert "unsupported Kiwoom WebSocket channel" in result["error"]
     assert "domestic_stock_realtime" in result["supported_channels"]
     assert registry.calls == []
+
+
+def test_trading_kiwoom_websocket_channels_mcp_wrapper_uses_local_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kiwoom channel catalog MCP calls should stay local and argument-free."""
+    mod = _import_mcp_server_with_fake_fastmcp(monkeypatch)
+    registry = _RecordingRegistry()
+    monkeypatch.setattr(mod, "_get_registry", lambda: registry)
+
+    mod.trading_kiwoom_websocket_channels()
+
+    assert registry.calls == [("trading_kiwoom_websocket_channels", {})]

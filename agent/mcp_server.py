@@ -941,6 +941,13 @@ def trading_kiwoom_websocket_smoke(
     return registry.execute("trading_kiwoom_websocket_smoke", params)
 
 
+@mcp.tool
+def trading_kiwoom_websocket_channels() -> str:
+    """List the local Kiwoom WebSocket channel catalog without broker calls."""
+    registry = _get_registry()
+    return registry.execute("trading_kiwoom_websocket_channels", {})
+
+
 # ---------------------------------------------------------------------------
 # Swarm team tool
 # ---------------------------------------------------------------------------

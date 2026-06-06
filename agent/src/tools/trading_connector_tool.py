@@ -278,6 +278,38 @@ class TradingKiwoomWebSocketSmokeTool(BaseTool):
             return _json_result({"status": "error", "error": str(exc)})
 
 
+class TradingKiwoomWebSocketChannelsTool(BaseTool):
+    """List supported Kiwoom WebSocket channels without broker calls."""
+
+    name = "trading_kiwoom_websocket_channels"
+    description = (
+        "List the supported Kiwoom REST OpenAPI WebSocket channel catalog. "
+        "Offline/read-only: does not request tokens, open sockets, or write evidence."
+    )
+    parameters = {"type": "object", "properties": {}, "required": []}
+    repeatable = True
+    is_readonly = True
+
+    def execute(self, **_: Any) -> str:
+        """Return the local Kiwoom WebSocket channel catalog."""
+        try:
+            channels = {
+                channel: {"channel": channel, **dict(spec)}
+                for channel, spec in sorted(KIWOOM_WEBSOCKET_ENDPOINTS.items())
+            }
+            return _json_result(
+                {
+                    "status": "ok",
+                    "connector": "kiwoom",
+                    "network": "not_attempted",
+                    "count": len(channels),
+                    "channels": channels,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _json_result({"status": "error", "error": str(exc)})
+
+
 class TradingAccountTool(BaseTool):
     """Read account summary from a trading connector profile."""
 

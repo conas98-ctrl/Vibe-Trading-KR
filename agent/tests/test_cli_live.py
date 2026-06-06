@@ -255,6 +255,12 @@ class TestConnectorLiveDispatch:
             allow_live=True,
         )
 
+    def test_kiwoom_websocket_channels_routes_to_handler(self) -> None:
+        with patch("cli._legacy.cmd_connector_kiwoom_websocket_channels", return_value=0) as m:
+            assert self._dispatch(["connector", "kiwoom-websocket-channels"]) == 0
+
+        m.assert_called_once_with()
+
     def test_kiwoom_websocket_smoke_rejects_unknown_channel(self, tmp_path: Path) -> None:
         from cli._legacy import _build_parser
 
@@ -501,6 +507,27 @@ class TestKiwoomWebSocketSmokeCli:
                 },
             }
         ]
+
+
+class TestKiwoomWebSocketChannelCatalogCli:
+    def test_command_prints_official_catalog_without_broker_calls(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cli._legacy import EXIT_SUCCESS, cmd_connector_kiwoom_websocket_channels
+        from src.trading.connectors.kiwoom.sdk import KIWOOM_WEBSOCKET_ENDPOINTS
+
+        emitted: list[dict[str, Any]] = []
+        monkeypatch.setattr("cli._legacy.console.print_json", lambda *, data: emitted.append(data))
+
+        assert cmd_connector_kiwoom_websocket_channels() == EXIT_SUCCESS
+
+        assert emitted
+        payload = emitted[0]
+        assert payload["status"] == "ok"
+        assert payload["connector"] == "kiwoom"
+        assert payload["network"] == "not_attempted"
+        assert payload["count"] == len(KIWOOM_WEBSOCKET_ENDPOINTS)
+        assert payload["channels"]["domestic_stock_realtime"]["sample_type"] == "0B"
 
 
 # ---------------------------------------------------------------------------

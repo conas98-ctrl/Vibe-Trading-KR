@@ -3920,6 +3920,15 @@ def _connector_smoke_secret_markers(value: Any, *, prefix: str = "") -> list[str
     return sorted(dict.fromkeys(hits))
 
 
+def cmd_connector_kiwoom_websocket_channels() -> int:
+    """Print the local Kiwoom WebSocket channel catalog without broker calls."""
+    from src.tools.trading_connector_tool import TradingKiwoomWebSocketChannelsTool
+
+    payload = json.loads(TradingKiwoomWebSocketChannelsTool().execute())
+    console.print_json(data=payload)
+    return EXIT_SUCCESS
+
+
 def _live_profile_connector(
     profile_id: Optional[str],
     *,
@@ -4118,6 +4127,8 @@ def _dispatch_connector(args: argparse.Namespace) -> int:
             allow_broker_calls=args.allow_broker_calls,
             allow_live=args.allow_live,
         )
+    if sub == "kiwoom-websocket-channels":
+        return cmd_connector_kiwoom_websocket_channels()
     if sub == "authorize":
         return cmd_connector_authorize(args.profile)
     if sub == "status":
@@ -4635,6 +4646,11 @@ def _build_parser() -> argparse.ArgumentParser:
     connector_kiwoom_ws_smoke.add_argument("--max-samples", type=int, default=3, help="Maximum redacted samples to keep in evidence")
     connector_kiwoom_ws_smoke.add_argument("--allow-broker-calls", action="store_true", help="Actually call read-only Kiwoom WebSocket APIs")
     connector_kiwoom_ws_smoke.add_argument("--allow-live", action="store_true", help="Allow live Kiwoom checks in addition to --allow-broker-calls")
+
+    connector_subparsers.add_parser(
+        "kiwoom-websocket-channels",
+        help="Print the local Kiwoom WebSocket channel catalog",
+    )
 
     for name, help_text in (
         ("start", "Start the selected live connector runner"),
