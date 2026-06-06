@@ -643,6 +643,144 @@ vibe-trading --swarm-run investment_committee '{"topic":"BTC outlook"}'</code></
         ]
       },
       {
+        id: "tools/ls-websocket-smoke-runbook",
+        title: "LS WebSocket Smoke Runbook",
+        description: "LS증권 국내주식 WebSocket smoke를 안전하게 실행하고 evidence를 남기는 절차.",
+        lead: "LS WebSocket smoke는 기본적으로 broker call을 하지 않으며, 실제 LS Open API 네트워크 호출은 operator가 명시적으로 opt-in 했을 때만 실행됩니다.",
+        sections: [
+          {
+            id: "official-surfaces",
+            title: "공식 확인 표면",
+            body: `
+              <p>이 runbook은 LS증권 Open API의 국내주식 WebSocket smoke 흐름을 Vibe-Trading에서 확인하기 위한 한국어 절차입니다. 대상 profile은 <code>ls-paper-sdk</code>와 <code>ls-live-sdk-readonly</code>입니다.</p>
+              <ul>
+                <li><a href="https://openapi.ls-sec.co.kr/intro" target="_blank" rel="noreferrer">LS증권 Open API 포털</a></li>
+                <li><a href="https://openapi.ls-sec.co.kr/about-openapi" target="_blank" rel="noreferrer">OPEN API 소개와 이용안내</a></li>
+                <li><a href="https://openapi.ls-sec.co.kr/howto-sample" target="_blank" rel="noreferrer">공식 Python 적용 예제</a></li>
+                <li><a href="https://openapi.ls-sec.co.kr/apiservice?api_id=9a2800c3-9bf2-4d67-8d83-905074f06646&group_id=73142d9f-1983-48d2-8543-89b75535d34c" target="_blank" rel="noreferrer">주식 실시간 WebSocket API 가이드</a></li>
+              </ul>
+              <p>LS 공식 안내는 계좌 보유, xingAPI/OPEN API 신청, APP Key와 APP Secret 기반 접근토큰 발급, 그리고 WebSocket 실시간 데이터의 <code>wss</code> 프로토콜 사용을 요구합니다. Vibe-Trading의 LS WebSocket smoke는 공식 <code>/websocket/stock</code> 계약을 작게 감싼 credential-gated 확인 흐름입니다.</p>
+            `
+          },
+          {
+            id: "prerequisites",
+            title: "준비물",
+            body: `
+              <ol>
+                <li>LS증권 계좌와 xingAPI / OPEN API 사용신청이 완료된 상태.</li>
+                <li>계좌별로 발급된 APP Key와 APP Secret.</li>
+                <li><code>~/.vibe-trading/ls.json</code> 로컬 설정 파일. 이 파일은 저장소에 커밋하지 않습니다.</li>
+                <li>실전 profile을 사용할 경우 읽기 전용 확인 목적과 별도 live opt-in에 대한 operator 승인.</li>
+              </ol>
+              <pre><code>{
+  "profile": "paper",
+  "app_key": "YOUR_LS_APP_KEY",
+  "app_secret": "YOUR_LS_APP_SECRET",
+  "account": "12345678"
+}</code></pre>
+              <p><code>profile</code>은 <code>paper</code>, <code>live-readonly</code>, <code>live</code> 중 하나입니다. WebSocket smoke는 주문을 넣지 않지만 실전 profile 접근은 코드와 명령 모두에서 live opt-in을 요구합니다.</p>
+            `
+          },
+          {
+            id: "dry-run",
+            title: "Dry-run 확인",
+            body: `
+              <p>기본 명령은 broker call을 하지 않습니다. credential이나 network가 준비되지 않은 CI, 리뷰 환경, 문서 검증에서는 이 명령을 먼저 사용합니다.</p>
+              <pre><code>vibe-trading connector ls-websocket-smoke \\
+  --profile ls-paper-sdk \\
+  --channel kospi_trade \\
+  --tr-key 005930 \\
+  --evidence-path ~/.vibe-trading/evidence/ls-websocket-smoke-kospi-trade.json</code></pre>
+              <p>예상 결과는 <code>status=not_run</code>, <code>network=not_attempted</code>, <code>evidence_path=null</code>입니다. 이 상태는 실패가 아니라 안전 기본값입니다. 실제 접근토큰 발급, WebSocket 연결, evidence 파일 생성은 <code>--allow-broker-calls</code>가 있어야 진행됩니다.</p>
+            `
+          },
+          {
+            id: "credentialed-smoke",
+            title: "Credentialed smoke",
+            body: `
+              <p>모의투자 또는 읽기 전용 실전 계정이 준비된 뒤에만 broker call을 켭니다. LS WebSocket 운영 endpoint는 실전과 모의투자 포트가 다르므로 profile이 의도한 환경인지 먼저 확인하세요.</p>
+              <pre><code>vibe-trading connector ls-websocket-smoke \\
+  --profile ls-paper-sdk \\
+  --channel kospi_trade \\
+  --tr-key 005930 \\
+  --evidence-path ~/.vibe-trading/evidence/ls-websocket-smoke-kospi-trade.json \\
+  --max-messages 3 \\
+  --message-timeout 10 \\
+  --allow-broker-calls</code></pre>
+              <p>실전 읽기 전용 profile에서는 추가로 <code>--allow-live</code>가 필요합니다.</p>
+              <pre><code>vibe-trading connector ls-websocket-smoke \\
+  --profile ls-live-sdk-readonly \\
+  --channel kosdaq_orderbook \\
+  --tr-key 035720 \\
+  --evidence-path ~/.vibe-trading/evidence/ls-websocket-smoke-kosdaq-orderbook.json \\
+  --max-messages 3 \\
+  --message-timeout 10 \\
+  --allow-broker-calls \\
+  --allow-live</code></pre>
+              <p>실전 주문 권한, 주문 가능성, live order mandate proof는 이 smoke만으로 claim하지 않습니다. 이 명령은 WebSocket 수신 확인과 redacted evidence 작성 절차만 다룹니다.</p>
+            `
+          },
+          {
+            id: "channels",
+            title: "채널 선택",
+            body: `
+              <ul>
+                <li><code>kospi_trade</code>: 공식 TR <code>S3_</code>. <code>--tr-key</code>는 국내주식 종목코드입니다. 예: <code>005930</code>. KOSPI 체결 확인에 사용합니다.</li>
+                <li><code>kosdaq_trade</code>: 공식 TR <code>K3_</code>. <code>--tr-key</code>는 KOSDAQ 종목코드입니다. 예: <code>035720</code>. KOSDAQ 체결 확인에 사용합니다.</li>
+                <li><code>kospi_orderbook</code>: 공식 TR <code>H1_</code>. KOSPI 호가잔량 확인에 사용합니다.</li>
+                <li><code>kosdaq_orderbook</code>: 공식 TR <code>HA_</code>. KOSDAQ 호가잔량 확인에 사용합니다.</li>
+              </ul>
+              <p>전체 지원 채널은 <code>trading_ls_websocket_channels</code> 로컬/MCP tool로 확인합니다. 잘못된 채널 이름이나 빈 <code>tr_key</code>는 token issuance 또는 WebSocket 연결 전에 거부됩니다.</p>
+            `
+          },
+          {
+            id: "evidence",
+            title: "Evidence 보관",
+            body: `
+              <p><code>--evidence-path</code>에는 로컬 전용 경로를 지정합니다. 권장 위치는 <code>~/.vibe-trading/evidence/</code>처럼 저장소 밖에 있는 디렉터리입니다.</p>
+              <ul>
+                <li>APP Key, APP Secret, 접근토큰은 기록하지 않습니다.</li>
+                <li>subscription에는 <code>tr_key</code> 원문 대신 <code>tr_key_present</code>만 남깁니다.</li>
+                <li>sample payload는 이벤트 종류와 필드 개수 중심으로 축약하고 redaction을 한 번 더 적용합니다.</li>
+                <li>주문 접수/체결 계열 frame, 계좌번호, token 원문은 public PR이나 공개 문서에 붙이지 않습니다.</li>
+              </ul>
+              <p>Credentialed evidence에는 profile, endpoint, 수신 상태, channel summary가 포함될 수 있으므로 원본 JSON은 로컬에 보관합니다. 공개 PR에는 어떤 profile/channel을 어떤 opt-in으로 확인했는지와 redaction 방침만 요약합니다.</p>
+            `
+          },
+          {
+            id: "cli-mcp-tool",
+            title: "CLI / MCP 경로",
+            body: `
+              <p>CLI에서는 <code>vibe-trading connector ls-websocket-smoke</code>를 사용합니다. MCP client에서는 <code>trading_ls_websocket_smoke</code> tool을 사용합니다. 필수 인자는 <code>channel</code>, <code>tr_key</code>, <code>evidence_path</code>입니다. <code>allow_broker_calls</code> 기본값은 <code>false</code>이며, 실전 profile은 <code>allow_live=true</code>도 요구합니다.</p>
+              <pre><code>{
+  "connection": "ls-paper-sdk",
+  "channel": "kospi_trade",
+  "tr_key": "005930",
+  "evidence_path": "~/.vibe-trading/evidence/ls-websocket-smoke-kospi-trade.json",
+  "max_messages": 3,
+  "message_timeout": 10,
+  "allow_broker_calls": true
+}</code></pre>
+            `
+          },
+          {
+            id: "non-claims",
+            title: "아직 claim하지 않는 것",
+            body: `
+              <p>이 runbook은 절차와 safety gate를 고정합니다. 다음 항목은 실제 계정 credential, LS Open API 서비스 신청 상태, 시장 시간, 이용 조건 확인 전까지 완료로 claim하지 않습니다.</p>
+              <ul>
+                <li>실제 LS WebSocket에서 frame을 수신했다는 credentialed proof.</li>
+                <li>실전 주문 가능성 또는 실전 주문 권한.</li>
+                <li>LS market data의 재배포, 저장, 공개 공유 허용 여부.</li>
+                <li>KOSPI/KOSDAQ/주문 이벤트별 운영 한도와 rate-limit의 포괄 검증.</li>
+                <li>장중/장후/휴장일별 수신 품질 보장.</li>
+              </ul>
+              <p>Credentialed smoke를 수행한 뒤에는 로컬 evidence JSON을 검토하고, public PR에는 원본 credential/evidence를 공개하지 않았다는 요약만 남깁니다.</p>
+            `
+          }
+        ]
+      },
+      {
         id: "tools/kiwoom-websocket-channel-catalog",
         title: "Kiwoom WebSocket Channel Catalog",
         description: "키움증권 REST OpenAPI WebSocket endpoint와 control frame metadata를 broker call 없이 확인합니다.",

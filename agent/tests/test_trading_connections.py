@@ -223,6 +223,72 @@ def test_kis_websocket_smoke_tool_routes_to_profile_scoped_service(
     ]
 
 
+def test_ls_websocket_smoke_tool_routes_to_profile_scoped_service(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """The local tool should expose #155's gated service without touching the broker."""
+    calls: list[dict] = []
+
+    def fake_smoke_runner(profile_id, **kwargs):
+        calls.append({"profile_id": profile_id, "kwargs": kwargs})
+        return {
+            "status": "not_run",
+            "profile_id": profile_id,
+            "connector": "ls",
+            "network": "not_attempted",
+            "evidence_path": None,
+        }
+
+    monkeypatch.setattr(
+        "src.tools.trading_connector_tool.run_websocket_smoke_with_evidence",
+        fake_smoke_runner,
+    )
+
+    target = tmp_path / "ls-websocket-smoke.json"
+    result = trading_connector_tool.TradingLsWebSocketSmokeTool().execute(
+        connection="ls-paper-sdk",
+        channel="kospi_trade",
+        tr_key="005930",
+        evidence_path=str(target),
+        max_messages="2",
+        message_timeout="1.5",
+        connect_attempts="3",
+        connect_backoff_seconds="0.25",
+        reconnect_attempts="1",
+        reconnect_backoff_seconds="0.5",
+        max_samples="1",
+        allow_broker_calls=False,
+        allow_live=False,
+    )
+
+    payload = json.loads(result)
+    assert payload["status"] == "not_run"
+    assert payload["profile_id"] == "ls-paper-sdk"
+    assert calls == [
+        {
+            "profile_id": "ls-paper-sdk",
+            "kwargs": {
+                "channel": "kospi_trade",
+                "tr_key": "005930",
+                "evidence_path": str(target),
+                "max_messages": 2,
+                "message_timeout": 1.5,
+                "connect_attempts": 3,
+                "connect_backoff_seconds": 0.25,
+                "reconnect_attempts": 1,
+                "reconnect_backoff_seconds": 0.5,
+                "max_samples": 1,
+                "allow_broker_calls": False,
+                "allow_live": False,
+                "host": None,
+                "port": None,
+                "client_id": None,
+                "account": None,
+            },
+        }
+    ]
+
+
 def test_kiwoom_websocket_smoke_tool_registers_as_local_write_tool() -> None:
     """The smoke evidence tool is local-registry only in this slice."""
     registry = build_registry(include_shell_tools=False)
@@ -326,6 +392,28 @@ def test_kis_websocket_channels_tool_registers_as_local_readonly_tool() -> None:
     assert tool is not None
     assert tool.repeatable is True
     assert tool.is_readonly is True
+
+
+def test_ls_websocket_smoke_tool_registers_as_local_write_tool() -> None:
+    """The smoke evidence tool is local-registry only in this slice."""
+    registry = build_registry(include_shell_tools=False)
+    tool = registry.get("trading_ls_websocket_smoke")
+
+    assert tool is not None
+    assert tool.repeatable is True
+    assert tool.is_readonly is False
+
+
+def test_ls_websocket_smoke_tool_schema_exposes_supported_channels() -> None:
+    """Agent-callable smoke metadata should surface the official LS channel catalog."""
+    from src.trading.connectors.ls.sdk import LS_WEBSOCKET_CHANNELS
+
+    channel_schema = trading_connector_tool.TradingLsWebSocketSmokeTool.parameters["properties"]["channel"]
+
+    assert channel_schema["enum"] == sorted(LS_WEBSOCKET_CHANNELS)
+    assert "kospi_trade" in channel_schema["enum"]
+    assert "kosdaq_orderbook" in channel_schema["enum"]
+    assert "bogus" not in channel_schema["enum"]
 
 
 def test_live_broker_mcp_wrappers_are_hidden_from_agent_registry(monkeypatch: pytest.MonkeyPatch) -> None:

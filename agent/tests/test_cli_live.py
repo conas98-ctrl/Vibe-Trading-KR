@@ -15,6 +15,8 @@ Covers SPEC.md §9 Decision 1 (CLI surface table) and Consent §2/§4:
 from __future__ import annotations
 
 import json
+import sys
+import types
 from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import patch
@@ -86,6 +88,35 @@ def _write_mandate(root: Path, broker: str = "robinhood", *, schema_version: int
     return path
 
 
+def _parser_plugin_stubs() -> dict[str, types.ModuleType]:
+    """Keep connector parser tests independent of unrelated optional CLI plugins."""
+
+    def _noop_add_subparser(_subparsers: Any) -> None:
+        return None
+
+    factors_pkg = types.ModuleType("src.factors")
+    factors_pkg.__path__ = []  # type: ignore[attr-defined]
+    factors_cli = types.ModuleType("src.factors.cli_handlers")
+    factors_cli.add_subparser = _noop_add_subparser  # type: ignore[attr-defined]
+    hypotheses_pkg = types.ModuleType("src.hypotheses")
+    hypotheses_pkg.__path__ = []  # type: ignore[attr-defined]
+    hypotheses_cli = types.ModuleType("src.hypotheses.cli_handlers")
+    hypotheses_cli.add_subparser = _noop_add_subparser  # type: ignore[attr-defined]
+    return {
+        "src.factors": factors_pkg,
+        "src.factors.cli_handlers": factors_cli,
+        "src.hypotheses": hypotheses_pkg,
+        "src.hypotheses.cli_handlers": hypotheses_cli,
+    }
+
+
+def _build_connector_test_parser():
+    from cli._legacy import _build_parser
+
+    with patch.dict(sys.modules, _parser_plugin_stubs()):
+        return _build_parser()
+
+
 # ---------------------------------------------------------------------------
 # Subcommand dispatch
 # ---------------------------------------------------------------------------
@@ -93,9 +124,9 @@ def _write_mandate(root: Path, broker: str = "robinhood", *, schema_version: int
 
 class TestConnectorLiveDispatch:
     def _dispatch(self, argv: list[str]) -> int:
-        from cli._legacy import _build_parser, _dispatch_connector
+        from cli._legacy import _dispatch_connector
 
-        args = _build_parser().parse_args(argv)
+        args = _build_connector_test_parser().parse_args(argv)
         return _dispatch_connector(args)
 
     def test_authorize_routes_to_handler(self) -> None:
@@ -364,6 +395,73 @@ class TestConnectorLiveDispatch:
 
         m.assert_called_once_with()
 
+    def test_ls_websocket_smoke_routes_to_handler(self, tmp_path: Path) -> None:
+        target = tmp_path / "ls-websocket-smoke.json"
+        with patch("cli._legacy.cmd_connector_ls_websocket_smoke", return_value=0) as m:
+            assert self._dispatch(
+                [
+                    "connector",
+                    "ls-websocket-smoke",
+                    "--profile",
+                    "ls-paper-sdk",
+                    "--channel",
+                    "kospi_trade",
+                    "--tr-key",
+                    "005930",
+                    "--evidence-path",
+                    str(target),
+                    "--max-messages",
+                    "2",
+                    "--message-timeout",
+                    "1.5",
+                    "--connect-attempts",
+                    "2",
+                    "--connect-backoff-seconds",
+                    "0.25",
+                    "--reconnect-attempts",
+                    "1",
+                    "--reconnect-backoff-seconds",
+                    "0.5",
+                    "--max-samples",
+                    "1",
+                    "--allow-broker-calls",
+                    "--allow-live",
+                ]
+            ) == 0
+        m.assert_called_once_with(
+            "ls-paper-sdk",
+            channel="kospi_trade",
+            tr_key="005930",
+            evidence_path=target,
+            max_messages=2,
+            message_timeout=1.5,
+            connect_attempts=2,
+            connect_backoff_seconds=0.25,
+            reconnect_attempts=1,
+            reconnect_backoff_seconds=0.5,
+            max_samples=1,
+            allow_broker_calls=True,
+            allow_live=True,
+        )
+
+    def test_ls_websocket_smoke_rejects_unknown_channel(self, tmp_path: Path) -> None:
+        parser = _build_connector_test_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                [
+                    "connector",
+                    "ls-websocket-smoke",
+                    "--profile",
+                    "ls-paper-sdk",
+                    "--channel",
+                    "bogus",
+                    "--tr-key",
+                    "005930",
+                    "--evidence-path",
+                    str(tmp_path / "ls-websocket-smoke.json"),
+                ]
+            )
+
     def test_no_subcommand_is_usage_error(self) -> None:
         from cli._legacy import EXIT_USAGE_ERROR
 
@@ -371,9 +469,7 @@ class TestConnectorLiveDispatch:
 
     def test_no_connector_commit_verb_exists(self) -> None:
         """SPEC: the CLI connector group must not be able to create/widen a mandate."""
-        from cli._legacy import _build_parser
-
-        parser = _build_parser()
+        parser = _build_connector_test_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["connector", "commit", "robinhood-live-mcp"])
 
@@ -776,6 +872,62 @@ class TestConnectorHaltResume:
 
         assert cmd_connector_halt("ibkr-paper-local") == EXIT_USAGE_ERROR
         assert not (live_root / "live" / "HALT").exists()
+
+
+# ---------------------------------------------------------------------------
+# LS WebSocket smoke
+# ---------------------------------------------------------------------------
+
+
+class TestLsWebSocketSmokeCli:
+    def test_command_forwards_to_profile_scoped_service(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cli._legacy import EXIT_SUCCESS, cmd_connector_ls_websocket_smoke
+
+        calls: list[dict[str, Any]] = []
+
+        def fake_smoke_service(profile_id: str, **kwargs: Any) -> dict[str, Any]:
+            calls.append({"profile_id": profile_id, "kwargs": kwargs})
+            return {"status": "planned", "profile_id": profile_id, "evidence_path": str(kwargs["evidence_path"])}
+
+        monkeypatch.setattr("src.trading.service.run_websocket_smoke_with_evidence", fake_smoke_service)
+
+        target = tmp_path / "ls-websocket-smoke.json"
+
+        assert cmd_connector_ls_websocket_smoke(
+            "ls-paper-sdk",
+            channel="kospi_trade",
+            tr_key="005930",
+            evidence_path=target,
+            max_messages=2,
+            message_timeout=1.5,
+            connect_attempts=2,
+            connect_backoff_seconds=0.25,
+            reconnect_attempts=1,
+            reconnect_backoff_seconds=0.5,
+            max_samples=1,
+        ) == EXIT_SUCCESS
+
+        assert calls == [
+            {
+                "profile_id": "ls-paper-sdk",
+                "kwargs": {
+                    "channel": "kospi_trade",
+                    "tr_key": "005930",
+                    "evidence_path": target,
+                    "max_messages": 2,
+                    "message_timeout": 1.5,
+                    "connect_attempts": 2,
+                    "connect_backoff_seconds": 0.25,
+                    "reconnect_attempts": 1,
+                    "reconnect_backoff_seconds": 0.5,
+                    "max_samples": 1,
+                    "allow_broker_calls": False,
+                    "allow_live": False,
+                },
+            }
+        ]
 
 
 # ---------------------------------------------------------------------------

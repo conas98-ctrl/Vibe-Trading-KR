@@ -181,6 +181,7 @@ def test_mcp_server_exposes_well_known_tool_names() -> None:
         "trading_kis_websocket_smoke",
         "trading_kis_websocket_channels",
         "trading_ls_websocket_channels",
+        "trading_ls_websocket_smoke",
     }
     missing = expected - registered
     assert not missing, (
@@ -452,3 +453,72 @@ def test_trading_ls_websocket_channels_mcp_wrapper_is_readonly_catalog(
     mod.trading_ls_websocket_channels()
 
     assert registry.calls == [("trading_ls_websocket_channels", {})]
+
+
+def test_trading_ls_websocket_smoke_mcp_wrapper_forwards_safety_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LS WebSocket smoke MCP calls should preserve explicit safety flags."""
+    mod = _import_mcp_server_with_fake_fastmcp(monkeypatch)
+    registry = _RecordingRegistry()
+    monkeypatch.setattr(mod, "_get_registry", lambda: registry)
+
+    mod.trading_ls_websocket_smoke(
+        channel="kospi_trade",
+        tr_key="005930",
+        evidence_path="/tmp/ls-websocket-smoke.json",
+        connection="ls-paper-sdk",
+        max_messages=2,
+        message_timeout=1.5,
+        connect_attempts=3,
+        connect_backoff_seconds=0.25,
+        reconnect_attempts=1,
+        reconnect_backoff_seconds=0.5,
+        max_samples=1,
+        allow_broker_calls=False,
+        allow_live=False,
+    )
+
+    assert registry.calls == [
+        (
+            "trading_ls_websocket_smoke",
+            {
+                "connection": "ls-paper-sdk",
+                "channel": "kospi_trade",
+                "tr_key": "005930",
+                "evidence_path": "/tmp/ls-websocket-smoke.json",
+                "max_messages": 2,
+                "message_timeout": 1.5,
+                "connect_attempts": 3,
+                "connect_backoff_seconds": 0.25,
+                "reconnect_attempts": 1,
+                "reconnect_backoff_seconds": 0.5,
+                "max_samples": 1,
+                "allow_broker_calls": False,
+                "allow_live": False,
+            },
+        )
+    ]
+
+
+def test_trading_ls_websocket_smoke_mcp_wrapper_rejects_unknown_channel_before_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown LS WebSocket channels should not reach the backend registry."""
+    mod = _import_mcp_server_with_fake_fastmcp(monkeypatch)
+    registry = _RecordingRegistry()
+    monkeypatch.setattr(mod, "_get_registry", lambda: registry)
+
+    result = json.loads(
+        mod.trading_ls_websocket_smoke(
+            channel="bogus",
+            tr_key="005930",
+            evidence_path="/tmp/ls-websocket-smoke.json",
+            connection="ls-paper-sdk",
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "unsupported LS WebSocket channel" in result["error"]
+    assert "kospi_trade" in result["supported_channels"]
+    assert registry.calls == []

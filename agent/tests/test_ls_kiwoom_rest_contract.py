@@ -7,6 +7,7 @@ use fake clients so they do not require live credentials or network calls.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from urllib.parse import urlparse
 
@@ -14,7 +15,7 @@ import pytest
 
 from src.tools.trading_connector_tool import TradingLsWebSocketChannelsTool
 from src.trading.connectors.kiwoom import sdk as kiwoom
-from src.trading.connectors.kr_common import KoreanConnectorConfig
+from src.trading.connectors.kr_common import KoreanConnectorConfig, KoreanConnectorConfigError
 from src.trading.connectors.ls import sdk as ls
 
 pytestmark = pytest.mark.unit
@@ -76,6 +77,191 @@ class _LsClient:
                 return _Response({"rsp_cd": "00156", "rsp_msg": "cancel order accepted", "CSPAT00801OutBlock2": {"OrdNo": 84006}})
             raise AssertionError(f"unexpected LS stock/order tr_cd={tr_cd}")
         raise AssertionError(f"unexpected LS POST {path}")
+
+
+class _LsSocket:
+    def __init__(self):
+        self.sent_json: list[dict] = []
+        self.closed = False
+        self.frames = [
+            json.dumps(
+                {
+                    "header": {"tr_cd": "S3_", "tr_key": "005930"},
+                    "body": {
+                        "shcode": "005930",
+                        "price": "70000",
+                        "change": "1000",
+                        "drate": "1.45",
+                        "cvolume": "15",
+                        "volume": "123456",
+                        "chetime": "153000",
+                    },
+                }
+            ),
+            {
+                "header": {"tr_cd": "HA_", "tr_key": "035720"},
+                "body": {
+                    "shcode": "035720",
+                    "offerho1": "50000",
+                    "offerrem1": "10",
+                    "bidho1": "49950",
+                    "bidrem1": "8",
+                    "hotime": "090001",
+                },
+            },
+        ]
+
+    async def send_json(self, payload):
+        self.sent_json.append(payload)
+
+    async def receive(self):
+        if not self.frames:
+            raise AssertionError("no more LS WebSocket frames")
+        return self.frames.pop(0)
+
+    async def close(self):
+        self.closed = True
+
+
+class _LsTransport:
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _LsSocket()
+
+    async def connect(self, url):
+        self.urls.append(url)
+        return self.socket
+
+
+class _SubscriptionAckLsSocket(_LsSocket):
+    def __init__(self):
+        super().__init__()
+        self.frames = [
+            {
+                "header": {"tr_cd": "S3_", "tr_type": "3", "tr_key": "005930"},
+                "body": {"rsp_cd": "00000", "rsp_msg": "SUBSCRIBE SUCCESS"},
+            },
+            json.dumps(
+                {
+                    "header": {"tr_cd": "S3_", "tr_key": "005930"},
+                    "body": {
+                        "shcode": "005930",
+                        "price": "70000",
+                        "change": "1000",
+                        "drate": "1.45",
+                        "cvolume": "15",
+                        "volume": "123456",
+                        "chetime": "153000",
+                    },
+                }
+            ),
+        ]
+
+
+class _SubscriptionAckLsTransport(_LsTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _SubscriptionAckLsSocket()
+
+
+class _SubscriptionErrorLsSocket(_LsSocket):
+    def __init__(self):
+        super().__init__()
+        self.frames = [
+            {
+                "header": {"tr_cd": "S3_", "tr_type": "3", "tr_key": "005930", "token": "token-ls"},
+                "body": {"rsp_cd": "99999", "rsp_msg": "SUBSCRIBE DENIED"},
+            }
+        ]
+
+
+class _SubscriptionErrorLsTransport(_LsTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _SubscriptionErrorLsSocket()
+
+
+class _MalformedFrameLsSocket(_LsSocket):
+    def __init__(self):
+        super().__init__()
+        self.frames = ["malformed-frame"]
+
+
+class _MalformedFrameLsTransport(_LsTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _MalformedFrameLsSocket()
+
+
+class _HangingLsSocket(_LsSocket):
+    async def receive(self):
+        await asyncio.sleep(1)
+
+
+class _HangingLsTransport(_LsTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _HangingLsSocket()
+
+
+class _FlakyLsTransport(_LsTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _LsSocket()
+        self.failures_remaining = 1
+
+    async def connect(self, url):
+        self.urls.append(url)
+        if self.failures_remaining:
+            self.failures_remaining -= 1
+            raise OSError("temporary connect failure")
+        return self.socket
+
+
+class _FailingLsTransport(_LsTransport):
+    def __init__(self):
+        self.urls: list[str] = []
+        self.socket = _LsSocket()
+
+    async def connect(self, url):
+        self.urls.append(url)
+        raise OSError("temporary connect failure")
+
+
+class _DisconnectingLsSocket(_LsSocket):
+    async def receive(self):
+        raise ConnectionError("socket dropped after subscribe")
+
+
+class _ReconnectLsTransport:
+    def __init__(self):
+        self.urls: list[str] = []
+        self.sockets: list[_LsSocket] = [_DisconnectingLsSocket(), _LsSocket()]
+        self._index = 0
+
+    async def connect(self, url):
+        self.urls.append(url)
+        socket = self.sockets[self._index]
+        self._index += 1
+        return socket
+
+
+class _WebSocketClient:
+    def __init__(self):
+        self.sent: list[str] = []
+        self.closed = False
+        self.messages: list[str | dict] = [
+            json.dumps({"header": {"tr_cd": "S3_", "tr_key": "005930"}, "body": {"shcode": "005930", "price": "70000"}})
+        ]
+
+    async def send(self, payload):
+        self.sent.append(payload)
+
+    async def recv(self):
+        return self.messages.pop(0)
+
+    async def close(self):
+        self.closed = True
 
 
 class _KiwoomClient:
@@ -294,6 +480,1237 @@ def test_ls_websocket_parser_normalizes_trade_orderbook_and_order_events() -> No
     assert order_event["order"]["symbol"] == "005930"
     assert order_event["order"]["side"] == "buy"
     assert order_event["order"]["filled_quantity"] == 1.0
+
+
+def test_ls_websocket_smoke_uses_token_subscribe_and_samples() -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=2,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["connector"] == "ls"
+    assert result["network"] == "injected_transport"
+    assert result["uri"] == "wss://openapi.ls-sec.co.kr:29443/websocket/stock"
+    assert result["auth"] == "access_token"
+    assert result["subscription"] == {"channel": "kospi_trade", "tr_cd": "S3_", "tr_type": "3", "tr_key": "005930"}
+    assert result["received_frames"] == 2
+    assert result["sample_payloads"][0]["channel"] == "trade"
+    assert result["sample_payloads"][0]["symbol"] == "005930"
+    assert result["sample_payloads"][1]["channel"] == "orderbook"
+    assert transport.urls == ["wss://openapi.ls-sec.co.kr:29443/websocket/stock"]
+    assert transport.socket.sent_json == [
+        {"header": {"token": "token-ls", "tr_type": "3"}, "body": {"tr_cd": "S3_", "tr_key": "005930"}}
+    ]
+    assert transport.socket.closed is True
+    assert client.calls[0]["path"] == "/oauth2/token"
+    assert json.dumps(result["sample_payloads"], sort_keys=True)
+
+
+def test_ls_websocket_smoke_records_subscription_ack_summary() -> None:
+    client = _LsClient()
+    transport = _SubscriptionAckLsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=2,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["subscription"] == {"channel": "kospi_trade", "tr_cd": "S3_", "tr_type": "3", "tr_key": "005930"}
+    assert result["received_frames"] == 2
+    assert result["subscription_events"] == [
+        {
+            "tr_cd": "S3_",
+            "tr_type": "3",
+            "status": "ok",
+            "code": "00000",
+            "message": "SUBSCRIBE SUCCESS",
+            "tr_key_present": True,
+        }
+    ]
+    assert len(result["sample_payloads"]) == 1
+    assert result["sample_payloads"][0]["channel"] == "trade"
+    assert transport.socket.closed is True
+
+
+def test_ls_websocket_smoke_fails_closed_on_subscription_error_ack() -> None:
+    client = _LsClient()
+    transport = _SubscriptionErrorLsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=1,
+        )
+    )
+
+    assert result["status"] == "subscription_error"
+    assert result["received_frames"] == 1
+    assert result["sample_payloads"] == []
+    assert result["subscription_events"] == [
+        {
+            "tr_cd": "S3_",
+            "tr_type": "3",
+            "status": "error",
+            "code": "99999",
+            "message": "SUBSCRIBE DENIED",
+            "tr_key_present": True,
+        }
+    ]
+    assert "SUBSCRIBE DENIED" in result["reason"]
+    assert transport.socket.closed is True
+
+
+def test_ls_websocket_smoke_fails_closed_on_malformed_frame() -> None:
+    client = _LsClient()
+    transport = _MalformedFrameLsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=1,
+        )
+    )
+
+    assert result["status"] == "frame_error"
+    assert result["received_frames"] == 1
+    assert result["sample_payloads"] == []
+    assert len(result["frame_errors"]) == 1
+    assert result["frame_errors"][0]["status"] == "error"
+    assert result["frame_errors"][0]["error"]
+    assert result["frame_errors"][0]["error"] in result["reason"]
+    assert "malformed-frame" not in json.dumps(result, ensure_ascii=False, sort_keys=True)
+    assert transport.socket.closed is True
+
+
+def test_ls_websocket_smoke_rejects_non_positive_max_messages_before_network() -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=0,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "max_messages"
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert result["sample_payloads"] == []
+    assert "positive integer" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_ls_websocket_smoke_rejects_non_positive_message_timeout_before_network() -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=1,
+            message_timeout=0,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "message_timeout"
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert result["sample_payloads"] == []
+    assert "positive number" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_ls_websocket_smoke_rejects_invalid_connect_attempts_before_network() -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=1,
+            connect_attempts=0,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "connect_attempts"
+    assert result["requested_value"] == 0
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert result["sample_payloads"] == []
+    assert "positive integer" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_ls_websocket_smoke_rejects_invalid_reconnect_attempts_before_network() -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=1,
+            reconnect_attempts=-1,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "reconnect_attempts"
+    assert result["requested_value"] == -1
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert result["sample_payloads"] == []
+    assert "non-negative integer" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_ls_websocket_smoke_rejects_invalid_connect_backoff_before_network() -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=1,
+            connect_backoff_seconds=-0.1,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "connect_backoff_seconds"
+    assert result["requested_value"] == -0.1
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert result["sample_payloads"] == []
+    assert "non-negative number" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_ls_websocket_smoke_rejects_invalid_reconnect_backoff_before_network() -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=1,
+            reconnect_backoff_seconds=-0.1,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "reconnect_backoff_seconds"
+    assert result["requested_value"] == -0.1
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert result["sample_payloads"] == []
+    assert "non-negative number" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_ls_websocket_smoke_rejects_unknown_channel_before_token() -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="unknown_channel",
+            tr_key="005930.KS",
+            client=client,
+            transport=transport,
+            max_messages=1,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "channel"
+    assert result["requested_value"] == "unknown_channel"
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert result["sample_payloads"] == []
+    assert "supported LS WebSocket channel" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_ls_websocket_smoke_rejects_empty_tr_key_before_token() -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="",
+            client=client,
+            transport=transport,
+            max_messages=1,
+        )
+    )
+
+    assert result["status"] == "invalid_request"
+    assert result["parameter"] == "tr_key"
+    assert result["requested_value"] == ""
+    assert result["network"] == "not_attempted"
+    assert result["received_frames"] == 0
+    assert result["sample_payloads"] == []
+    assert "requires a tr_key" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert transport.socket.closed is False
+
+
+def test_ls_websocket_smoke_times_out_and_closes_socket() -> None:
+    client = _LsClient()
+    transport = _HangingLsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=2,
+            message_timeout=0.001,
+        )
+    )
+
+    assert result["status"] == "timeout"
+    assert result["network"] == "injected_transport"
+    assert result["received_frames"] == 0
+    assert result["sample_payloads"] == []
+    assert result["timeout_seconds"] == 0.001
+    assert "message_timeout" in result["reason"]
+    assert transport.socket.closed is True
+
+
+def test_ls_websocket_smoke_retries_connect_failure_before_subscribe() -> None:
+    client = _LsClient()
+    transport = _FlakyLsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=2,
+            connect_attempts=2,
+            connect_backoff_seconds=0,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["connection_attempts"] == 2
+    assert result["received_frames"] == 2
+    assert transport.urls == [
+        "wss://openapi.ls-sec.co.kr:29443/websocket/stock",
+        "wss://openapi.ls-sec.co.kr:29443/websocket/stock",
+    ]
+    assert len(transport.socket.sent_json) == 1
+    assert transport.socket.closed is True
+
+
+def test_ls_websocket_smoke_reconnects_and_resubscribes_after_receive_drop() -> None:
+    client = _LsClient()
+    transport = _ReconnectLsTransport()
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930",
+            client=client,
+            transport=transport,
+            max_messages=2,
+            reconnect_attempts=1,
+            reconnect_backoff_seconds=0,
+        )
+    )
+
+    first_socket, second_socket = transport.sockets
+    assert result["status"] == "ok"
+    assert result["reconnects"] == 1
+    assert result["connection_attempts"] == 2
+    assert result["received_frames"] == 2
+    assert transport.urls == [
+        "wss://openapi.ls-sec.co.kr:29443/websocket/stock",
+        "wss://openapi.ls-sec.co.kr:29443/websocket/stock",
+    ]
+    assert len(first_socket.sent_json) == 1
+    assert first_socket.sent_json == second_socket.sent_json
+    assert first_socket.closed is True
+    assert second_socket.closed is True
+
+
+def test_ls_websocket_transport_adapter_sends_json_receives_and_closes() -> None:
+    socket = _WebSocketClient()
+    calls: list[str] = []
+
+    async def connect(url):
+        calls.append(url)
+        return socket
+
+    async def exercise() -> None:
+        transport = ls.LsWebSocketTransport(connect_factory=connect)
+        active = await transport.connect("wss://openapi.ls-sec.co.kr:29443/websocket/stock")
+        await active.send_json({"header": {"token": "token-ls", "tr_type": "3"}, "body": {"tr_cd": "S3_", "tr_key": "005930"}})
+        assert await active.receive() == json.dumps(
+            {"header": {"tr_cd": "S3_", "tr_key": "005930"}, "body": {"shcode": "005930", "price": "70000"}}
+        )
+        await active.close()
+
+    asyncio.run(exercise())
+
+    assert calls == ["wss://openapi.ls-sec.co.kr:29443/websocket/stock"]
+    assert json.loads(socket.sent[0]) == {
+        "header": {"token": "token-ls", "tr_type": "3"},
+        "body": {"tr_cd": "S3_", "tr_key": "005930"},
+    }
+    assert socket.closed is True
+
+
+def test_ls_websocket_smoke_uses_default_transport_factory(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    calls: list[str] = []
+
+    def factory():
+        calls.append("factory")
+        return transport
+
+    monkeypatch.setattr(ls, "create_websocket_transport", factory)
+
+    result = asyncio.run(
+        ls.run_websocket_smoke(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            client=client,
+            max_messages=2,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["network"] == "websocket_transport"
+    assert calls == ["factory"]
+    assert transport.urls == ["wss://openapi.ls-sec.co.kr:29443/websocket/stock"]
+    assert client.calls[0]["path"] == "/oauth2/token"
+
+
+def test_ls_websocket_smoke_reports_missing_websockets_when_default_transport_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def factory():
+        raise KoreanConnectorConfigError("LS WebSocket transport requires the websockets package.")
+
+    monkeypatch.setattr(ls, "create_websocket_transport", factory, raising=False)
+
+    result = asyncio.run(ls.run_websocket_smoke(_ls_cfg(), channel="kospi_trade", tr_key="005930.KS"))
+
+    assert result["status"] == "not_configured"
+    assert result["connector"] == "ls"
+    assert result["missing"] == ["websockets"]
+    assert result["network"] == "not_attempted"
+    assert "websockets package" in result["error"]
+
+
+def test_ls_websocket_smoke_evidence_redacts_subscription_and_raw_samples() -> None:
+    smoke_result = {
+        "status": "ok",
+        "connector": "ls",
+        "profile": "paper",
+        "environment": "paper",
+        "network": "injected_transport",
+        "uri": "wss://openapi.ls-sec.co.kr:29443/websocket/stock",
+        "auth": "access_token",
+        "subscription": {"channel": "kospi_trade", "tr_cd": "S3_", "tr_type": "3", "tr_key": "005930"},
+        "received_frames": 2,
+        "sample_payloads": [
+            {
+                "status": "ok",
+                "channel": "trade",
+                "tr_cd": "S3_",
+                "symbol": "005930",
+                "quote": {
+                    "last": 70000.0,
+                    "change": 1000.0,
+                    "change_rate": 1.45,
+                    "trade_volume": 15.0,
+                    "volume": 123456.0,
+                    "time": "153000",
+                    "raw": {"shcode": "005930", "price": "70000", "volume": "123456"},
+                },
+                "raw": {"header": {"token": "token-ls", "tr_key": "005930"}, "body": {"shcode": "005930"}},
+            },
+            {
+                "status": "ok",
+                "channel": "orderbook",
+                "tr_cd": "HA_",
+                "symbol": "035720",
+                "orderbook": {
+                    "asks": [{"price": 50000.0, "quantity": 10.0}],
+                    "bids": [{"price": 49950.0, "quantity": 8.0}],
+                    "raw": {"shcode": "035720", "offerho1": "50000"},
+                },
+                "raw": {"body": {"shcode": "035720"}},
+            },
+        ],
+    }
+
+    evidence = ls.websocket_smoke_evidence(smoke_result, max_samples=1)
+
+    assert evidence["status"] == "ok"
+    assert evidence["connector"] == "ls"
+    assert evidence["subscription"] == {
+        "channel": "kospi_trade",
+        "tr_cd": "S3_",
+        "tr_type": "3",
+        "tr_key_present": True,
+        "tr_key_kind": "symbol",
+    }
+    assert evidence["sample_count"] == 2
+    assert evidence["sample_payloads"] == [
+        {
+            "status": "ok",
+            "channel": "trade",
+            "tr_cd": "S3_",
+            "symbol_present": True,
+            "quote_keys": ["change", "change_rate", "last", "time", "trade_volume", "volume"],
+            "raw_header_keys": ["token", "tr_key"],
+            "raw_body_keys": ["shcode"],
+        }
+    ]
+    dumped = json.dumps(evidence, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in dumped
+    assert "035720" not in dumped
+    assert "token-ls" not in dumped
+    assert "70000" not in dumped
+
+
+def test_ls_websocket_smoke_evidence_redacts_subscription_ack_values() -> None:
+    smoke_result = {
+        "status": "ok",
+        "connector": "ls",
+        "profile": "paper",
+        "environment": "paper",
+        "network": "injected_transport",
+        "uri": "wss://openapi.ls-sec.co.kr:29443/websocket/stock",
+        "auth": "access_token",
+        "subscription": {"channel": "kospi_trade", "tr_cd": "S3_", "tr_type": "3", "tr_key": "005930"},
+        "subscription_events": [
+            {
+                "tr_cd": "S3_",
+                "tr_type": "3",
+                "status": "ok",
+                "code": "00000",
+                "message": "SUBSCRIBE SUCCESS",
+                "tr_key": "005930",
+                "token": "token-ls",
+                "tr_key_present": True,
+            }
+        ],
+        "received_frames": 1,
+        "sample_payloads": [],
+    }
+
+    evidence = ls.websocket_smoke_evidence(smoke_result)
+
+    assert evidence["subscription_events"] == [
+        {
+            "tr_cd": "S3_",
+            "tr_type": "3",
+            "status": "ok",
+            "code": "00000",
+            "message": "SUBSCRIBE SUCCESS",
+            "tr_key_present": True,
+        }
+    ]
+    dumped = json.dumps(evidence, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in dumped
+    assert "token-ls" not in dumped
+
+
+def test_ls_websocket_smoke_with_evidence_writes_subscription_error_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _SubscriptionErrorLsTransport()
+    target = tmp_path / "subscription-error" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "subscription_error"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "subscription_error"
+    assert payload["subscription_events"][0]["message"] == "SUBSCRIBE DENIED"
+    assert "SUBSCRIBE DENIED" in payload["reason"]
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in serialized
+    assert "token-ls" not in serialized
+
+
+def test_ls_websocket_smoke_with_evidence_writes_frame_error_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _MalformedFrameLsTransport()
+    target = tmp_path / "frame-error" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "frame_error"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "frame_error"
+    assert len(payload["frame_errors"]) == 1
+    assert payload["frame_errors"][0]["status"] == "error"
+    assert payload["frame_errors"][0]["error"]
+    assert payload["frame_errors"][0]["error"] in payload["reason"]
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "malformed-frame" not in serialized
+    assert "005930" not in serialized
+
+
+def test_ls_websocket_smoke_with_evidence_writes_invalid_max_messages_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "invalid-max-messages" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=0,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "max_messages"
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "positive integer" in payload["reason"]
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_ls_websocket_smoke_with_evidence_writes_invalid_message_timeout_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "invalid-message-timeout" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+            message_timeout=0,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "message_timeout"
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "positive number" in payload["reason"]
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_ls_websocket_smoke_with_evidence_writes_invalid_connect_attempts_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "invalid-connect-attempts" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+            connect_attempts=0,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "connect_attempts"
+    assert payload["requested_value"] == 0
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "positive integer" in payload["reason"]
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_ls_websocket_smoke_with_evidence_writes_invalid_reconnect_attempts_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "invalid-reconnect-attempts" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+            reconnect_attempts=-1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "reconnect_attempts"
+    assert payload["requested_value"] == -1
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "non-negative integer" in payload["reason"]
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_ls_websocket_smoke_with_evidence_writes_invalid_connect_backoff_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "invalid-connect-backoff" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+            connect_backoff_seconds=-0.1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "connect_backoff_seconds"
+    assert payload["requested_value"] == -0.1
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "non-negative number" in payload["reason"]
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_ls_websocket_smoke_with_evidence_writes_invalid_reconnect_backoff_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "invalid-reconnect-backoff" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930.KS",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+            reconnect_backoff_seconds=-0.1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "reconnect_backoff_seconds"
+    assert payload["requested_value"] == -0.1
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "non-negative number" in payload["reason"]
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_ls_websocket_smoke_with_evidence_writes_unknown_channel_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "invalid-channel" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="unknown_channel",
+            tr_key="005930.KS",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "channel"
+    assert payload["requested_value"] == "unknown_channel"
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "supported LS WebSocket channel" in payload["reason"]
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_ls_websocket_smoke_with_evidence_writes_empty_tr_key_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "invalid-tr-key" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=1,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "invalid_request"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "invalid_request"
+    assert payload["parameter"] == "tr_key"
+    assert payload["requested_value"] == ""
+    assert payload["network"] == "not_attempted"
+    assert payload["received_frames"] == 0
+    assert "requires a tr_key" in payload["reason"]
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in serialized
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_ls_write_websocket_smoke_evidence_saves_redacted_json(tmp_path) -> None:
+    result = {
+        "status": "ok",
+        "connector": "ls",
+        "profile": "paper",
+        "environment": "paper",
+        "network": "injected_transport",
+        "uri": "wss://openapi.ls-sec.co.kr:29443/websocket/stock",
+        "auth": "access_token",
+        "subscription": {"channel": "kospi_trade", "tr_cd": "S3_", "tr_type": "3", "tr_key": "005930"},
+        "received_frames": 1,
+        "sample_payloads": [
+            {
+                "status": "ok",
+                "channel": "trade",
+                "tr_cd": "S3_",
+                "symbol": "005930",
+                "quote": {
+                    "last": 70000.0,
+                    "raw": {"shcode": "005930", "price": "70000", "volume": "123456"},
+                },
+                "raw": {"header": {"token": "token-ls", "tr_key": "005930"}, "body": {"shcode": "005930"}},
+            }
+        ],
+    }
+    target = tmp_path / "nested" / "ls-websocket-smoke.json"
+
+    written = ls.write_websocket_smoke_evidence(result, target)
+
+    assert written == target
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload["subscription"] == {
+        "channel": "kospi_trade",
+        "tr_cd": "S3_",
+        "tr_type": "3",
+        "tr_key_present": True,
+        "tr_key_kind": "symbol",
+    }
+    assert payload["sample_payloads"][0]["symbol_present"] is True
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in serialized
+    assert "token-ls" not in serialized
+    assert "70000" not in serialized
+    assert "raw_values" not in serialized
+
+
+def test_ls_websocket_smoke_with_evidence_requires_broker_opt_in(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+        )
+    )
+
+    assert result["status"] == "not_run"
+    assert result["network"] == "not_attempted"
+    assert result["evidence_path"] is None
+    assert "allow_broker_calls=True" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert not target.exists()
+
+
+def test_ls_websocket_smoke_with_evidence_blocks_live_without_opt_in(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "ls-websocket-smoke-live.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(profile="live"),
+            channel="kospi_trade",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+        )
+    )
+
+    assert result["status"] == "blocked"
+    assert result["environment"] == "live"
+    assert result["network"] == "not_attempted"
+    assert result["evidence_path"] is None
+    assert "allow_live=True" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+    assert not target.exists()
+
+
+def test_ls_websocket_smoke_with_evidence_rejects_directory_path_before_broker_call(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "ls-websocket-smoke-dir"
+    target.mkdir()
+
+    try:
+        result = asyncio.run(
+            ls.run_websocket_smoke_with_evidence(
+                _ls_cfg(),
+                channel="kospi_trade",
+                tr_key="005930",
+                evidence_path=target,
+                client=client,
+                transport=transport,
+                allow_broker_calls=True,
+            )
+        )
+    except IsADirectoryError:
+        result = {"status": "raised", "network": "broker_called"}
+
+    assert result["status"] == "invalid_request"
+    assert result["network"] == "not_attempted"
+    assert result["evidence_path"] is None
+    assert result["parameter"] == "evidence_path"
+    assert str(target) in result["requested_value"]
+    assert "file path" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_ls_websocket_smoke_with_evidence_rejects_file_parent_before_broker_call(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    parent = tmp_path / "not-a-directory"
+    parent.write_text("existing file", encoding="utf-8")
+    target = parent / "ls-websocket-smoke.json"
+
+    try:
+        result = asyncio.run(
+            ls.run_websocket_smoke_with_evidence(
+                _ls_cfg(),
+                channel="kospi_trade",
+                tr_key="005930",
+                evidence_path=target,
+                client=client,
+                transport=transport,
+                allow_broker_calls=True,
+            )
+        )
+    except (FileExistsError, NotADirectoryError):
+        result = {"status": "raised", "network": "broker_called"}
+
+    assert result["status"] == "invalid_request"
+    assert result["network"] == "not_attempted"
+    assert result["evidence_path"] is None
+    assert result["parameter"] == "evidence_path"
+    assert str(target) in result["requested_value"]
+    assert "parent directory" in result["reason"]
+    assert client.calls == []
+    assert transport.urls == []
+
+
+def test_ls_websocket_smoke_with_evidence_writes_redacted_json_when_allowed(tmp_path) -> None:
+    client = _LsClient()
+    transport = _LsTransport()
+    target = tmp_path / "nested" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=2,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["evidence_path"] == str(target)
+    assert result["subscription"] == {
+        "channel": "kospi_trade",
+        "tr_cd": "S3_",
+        "tr_type": "3",
+        "tr_key_present": True,
+        "tr_key_kind": "symbol",
+    }
+    assert result["sample_count"] == 2
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload == {key: value for key, value in result.items() if key != "evidence_path"}
+    serialized = json.dumps(result, ensure_ascii=False, sort_keys=True)
+    assert "005930" not in serialized
+    assert "035720" not in serialized
+    assert "token-ls" not in serialized
+    assert "app-secret" not in serialized
+    assert "70000" not in serialized
+
+
+def test_ls_websocket_smoke_with_evidence_writes_timeout_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _HangingLsTransport()
+    target = tmp_path / "timeout" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=2,
+            message_timeout=0.001,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "timeout"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "timeout"
+    assert payload["timeout_seconds"] == 0.001
+    assert "message_timeout" in payload["reason"]
+    assert "005930" not in json.dumps(payload, sort_keys=True)
+
+
+def test_ls_websocket_smoke_with_evidence_writes_connection_error_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _FailingLsTransport()
+    target = tmp_path / "connection-error" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=2,
+            connect_attempts=2,
+            connect_backoff_seconds=0,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "connection_error"
+    assert result["evidence_path"] == str(target)
+    assert payload["status"] == "connection_error"
+    assert payload["connection_attempts"] == 2
+    assert "temporary connect failure" in payload["reason"]
+    assert "005930" not in json.dumps(payload, sort_keys=True)
+
+
+def test_ls_websocket_smoke_with_evidence_writes_reconnect_summary(tmp_path) -> None:
+    client = _LsClient()
+    transport = _ReconnectLsTransport()
+    target = tmp_path / "reconnect" / "ls-websocket-smoke.json"
+
+    result = asyncio.run(
+        ls.run_websocket_smoke_with_evidence(
+            _ls_cfg(),
+            channel="kospi_trade",
+            tr_key="005930",
+            evidence_path=target,
+            client=client,
+            transport=transport,
+            allow_broker_calls=True,
+            max_messages=2,
+            reconnect_attempts=1,
+            reconnect_backoff_seconds=0,
+        )
+    )
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert result["status"] == "ok"
+    assert result["reconnects"] == 1
+    assert result["connection_attempts"] == 2
+    assert payload["status"] == "ok"
+    assert payload["reconnects"] == 1
+    assert payload["connection_attempts"] == 2
+    assert payload["subscription"]["tr_key_present"] is True
+    assert "tr_key" not in payload["subscription"]
 
 
 def test_ls_quote_requests_token_and_official_t1101_contract() -> None:

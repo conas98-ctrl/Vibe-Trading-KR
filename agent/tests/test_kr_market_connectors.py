@@ -231,16 +231,70 @@ def test_kis_websocket_smoke_service_routes_profile_and_safety_flags(monkeypatch
     }
 
 
-def test_websocket_smoke_service_rejects_unsupported_connectors(tmp_path) -> None:
+def test_ls_websocket_smoke_service_routes_profile_and_safety_flags(monkeypatch, tmp_path) -> None:
+    from src.trading.connectors.ls import sdk as ls
+
+    calls: list[dict] = []
+
+    async def fake_smoke_runner(config, **kwargs):
+        calls.append({"config": config, "kwargs": kwargs})
+        return {
+            "status": "not_run",
+            "connector": "ls",
+            "profile": config.profile,
+            "environment": config.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "reason": "mocked smoke runner",
+        }
+
+    monkeypatch.setattr(ls, "run_websocket_smoke_with_evidence", fake_smoke_runner)
+
+    target = tmp_path / "ls-websocket-smoke.json"
     result = service.run_websocket_smoke_with_evidence(
         "ls-paper-sdk",
-        channel="stock_quote",
+        channel="kospi_trade",
         tr_key="005930",
-        evidence_path=tmp_path / "ls-websocket-smoke.json",
+        evidence_path=target,
+        allow_broker_calls=False,
+        allow_live=False,
+        max_messages=2,
+        max_samples=1,
+    )
+
+    assert result["status"] == "not_run"
+    assert result["profile_id"] == "ls-paper-sdk"
+    assert result["connector"] == "ls"
+    assert result["environment"] == "paper"
+    assert result["transport"] == "broker_sdk"
+    assert calls[0]["config"].connector == "ls"
+    assert calls[0]["config"].profile == "paper"
+    assert calls[0]["kwargs"] == {
+        "channel": "kospi_trade",
+        "tr_key": "005930",
+        "evidence_path": target,
+        "max_messages": 2,
+        "message_timeout": None,
+        "connect_attempts": 1,
+        "connect_backoff_seconds": 0.0,
+        "reconnect_attempts": 0,
+        "reconnect_backoff_seconds": 0.0,
+        "max_samples": 1,
+        "allow_broker_calls": False,
+        "allow_live": False,
+    }
+
+
+def test_websocket_smoke_service_rejects_unsupported_connectors(tmp_path) -> None:
+    result = service.run_websocket_smoke_with_evidence(
+        "db-paper-sdk",
+        channel="kospi_trade",
+        tr_key="005930",
+        evidence_path=tmp_path / "db-websocket-smoke.json",
     )
 
     assert result["status"] == "error"
-    assert result["profile_id"] == "ls-paper-sdk"
-    assert result["connector"] == "ls"
+    assert result["profile_id"] == "db-paper-sdk"
+    assert result["connector"] == "db"
     assert result["transport"] == "broker_sdk"
     assert "websocket_smoke.run" in result["error"]

@@ -234,6 +234,75 @@ class TradingLsWebSocketChannelsTool(BaseTool):
             return _json_result({"status": "error", "error": str(exc)})
 
 
+class TradingLsWebSocketSmokeTool(BaseTool):
+    """Run the gated LS WebSocket smoke/evidence flow through a profile."""
+
+    name = "trading_ls_websocket_smoke"
+    description = (
+        "Run the LS OpenAPI stock WebSocket smoke/evidence flow through an LS "
+        "broker SDK profile. Defaults to dry-run safety gates; set "
+        "allow_broker_calls only when operator-approved credentials are ready."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            **TRADING_COMMON_PARAMETERS,
+            "channel": {
+                "type": "string",
+                "enum": sorted(LS_WEBSOCKET_CHANNELS),
+                "description": "LS WebSocket channel key, e.g. kospi_trade or kosdaq_orderbook.",
+            },
+            "tr_key": {
+                "type": "string",
+                "description": "Subscription key, e.g. a Korean stock code such as 005930.",
+            },
+            "evidence_path": {
+                "type": "string",
+                "description": "Local JSON file path for redacted smoke evidence.",
+            },
+            "max_messages": {"type": "integer", "default": 3},
+            "message_timeout": {
+                "type": "number",
+                "description": "Optional seconds to wait for each message.",
+            },
+            "connect_attempts": {"type": "integer", "default": 1},
+            "connect_backoff_seconds": {"type": "number", "default": 0.0},
+            "reconnect_attempts": {"type": "integer", "default": 0},
+            "reconnect_backoff_seconds": {"type": "number", "default": 0.0},
+            "max_samples": {"type": "integer", "default": 3},
+            "allow_broker_calls": {"type": "boolean", "default": False},
+            "allow_live": {"type": "boolean", "default": False},
+        },
+        "required": ["channel", "tr_key", "evidence_path"],
+    }
+    repeatable = True
+    is_readonly = False
+
+    def execute(self, **kwargs: Any) -> str:
+        """Run LS WebSocket smoke evidence through the profile-scoped service."""
+        try:
+            return _json_result(
+                run_websocket_smoke_with_evidence(
+                    _connection(kwargs.get("connection")),
+                    channel=str(kwargs["channel"]).strip(),
+                    tr_key=str(kwargs["tr_key"]).strip(),
+                    evidence_path=str(kwargs["evidence_path"]).strip(),
+                    max_messages=_int_or_default(kwargs.get("max_messages"), 3),
+                    message_timeout=_num_or_none(kwargs.get("message_timeout")),
+                    connect_attempts=_int_or_default(kwargs.get("connect_attempts"), 1),
+                    connect_backoff_seconds=_float_or_default(kwargs.get("connect_backoff_seconds"), 0.0),
+                    reconnect_attempts=_int_or_default(kwargs.get("reconnect_attempts"), 0),
+                    reconnect_backoff_seconds=_float_or_default(kwargs.get("reconnect_backoff_seconds"), 0.0),
+                    max_samples=_int_or_default(kwargs.get("max_samples"), 3),
+                    allow_broker_calls=_bool_or_default(kwargs.get("allow_broker_calls"), False),
+                    allow_live=_bool_or_default(kwargs.get("allow_live"), False),
+                    **_overrides(kwargs),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _json_result({"status": "error", "error": str(exc)})
+
+
 class TradingCheckTool(BaseTool):
     """Check a trading connector profile."""
 

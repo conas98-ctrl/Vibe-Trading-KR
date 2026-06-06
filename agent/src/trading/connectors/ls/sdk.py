@@ -9,6 +9,7 @@ guide JSON for `/websocket/stock`.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import contextmanager
 from pathlib import Path
@@ -323,11 +324,18 @@ def build_websocket_subscribe_message(
 def parse_websocket_message(message: Mapping[str, Any] | str | bytes) -> dict[str, Any]:
     """Normalize LS WebSocket JSON events into stable dictionaries."""
 
-    if isinstance(message, bytes):
-        message = message.decode("utf-8")
-    payload = json.loads(message) if isinstance(message, str) else dict(message)
+    try:
+        if isinstance(message, bytes):
+            message = message.decode("utf-8")
+        payload = json.loads(message) if isinstance(message, str) else dict(message)
+    except (json.JSONDecodeError, TypeError, UnicodeDecodeError, ValueError) as exc:
+        return {"type": "error", "status": "error", "error": str(exc) or exc.__class__.__name__}
+    if not isinstance(payload, Mapping):
+        return {"type": "error", "status": "error", "error": "LS WebSocket frame must be a JSON object."}
     header = _first_mapping(payload.get("header"))
     body = _first_mapping(payload.get("body"))
+    if _is_websocket_system_event(header, body):
+        return _websocket_system_event(payload, header, body)
     tr_cd = str(header.get("tr_cd") or body.get("tr_cd") or "").strip()
     kind = _websocket_kind(tr_cd)
 
@@ -393,6 +401,702 @@ def parse_websocket_message(message: Mapping[str, Any] | str | bytes) -> dict[st
         "tr_cd": tr_cd,
         "raw": payload,
     }
+
+
+class LsWebSocketConnection:
+    """Small adapter around a real LS WebSocket client connection."""
+
+    def __init__(self, socket: Any, manager: Any | None = None):
+        self._socket = socket
+        self._manager = manager
+
+    async def send_json(self, payload: Mapping[str, Any]) -> None:
+        await self._socket.send(json.dumps(payload, ensure_ascii=False))
+
+    async def receive(self) -> str | bytes:
+        return await self._socket.recv()
+
+    async def close(self) -> None:
+        if self._manager is not None:
+            await self._manager.__aexit__(None, None, None)
+            return
+        await self._socket.close()
+
+
+class LsWebSocketTransport:
+    """Connect to LS OpenAPI's official WebSocket endpoint using ``websockets``."""
+
+    def __init__(self, connect_factory: Any | None = None):
+        self._connect_factory = connect_factory or _websockets_connect
+
+    async def connect(self, url: str) -> LsWebSocketConnection:
+        connection = self._connect_factory(url)
+        if hasattr(connection, "__await__"):
+            return LsWebSocketConnection(await connection)
+        if hasattr(connection, "__aenter__"):
+            return LsWebSocketConnection(await connection.__aenter__(), manager=connection)
+        return LsWebSocketConnection(connection)
+
+
+def create_websocket_transport() -> LsWebSocketTransport:
+    """Return the default LS WebSocket transport."""
+
+    return LsWebSocketTransport()
+
+
+async def run_websocket_smoke(
+    config: KoreanConnectorConfig | None = None,
+    *,
+    channel: str,
+    tr_key: str,
+    client: Any | None = None,
+    transport: Any | None = None,
+    max_messages: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+) -> dict[str, Any]:
+    """Run an LS WebSocket smoke flow."""
+
+    cfg = config or load_config()
+    injected_transport = transport is not None
+    missing = _missing_auth_fields(cfg)
+    if missing:
+        return {
+            "status": "not_configured",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "missing": missing,
+            "network": "not_attempted",
+        }
+    try:
+        message_target = int(max_messages)
+    except (TypeError, ValueError):
+        message_target = 0
+    if message_target < 1:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "max_messages",
+            "requested_value": max_messages,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "LS WebSocket smoke max_messages must be a positive integer.",
+        }
+    timeout_seconds: float | None = None
+    if message_timeout is not None:
+        try:
+            timeout_seconds = float(message_timeout)
+        except (TypeError, ValueError):
+            timeout_seconds = 0.0
+        if timeout_seconds <= 0:
+            return {
+                "status": "invalid_request",
+                "connector": CONNECTOR,
+                "profile": cfg.profile,
+                "environment": cfg.environment,
+                "network": "not_attempted",
+                "parameter": "message_timeout",
+                "requested_value": message_timeout,
+                "received_frames": 0,
+                "sample_payloads": [],
+                "subscription_events": [],
+                "frame_errors": [],
+                "reason": "LS WebSocket smoke message_timeout must be a positive number.",
+            }
+    try:
+        connect_attempt_count = int(connect_attempts)
+    except (TypeError, ValueError):
+        connect_attempt_count = 0
+    if connect_attempt_count < 1:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "connect_attempts",
+            "requested_value": connect_attempts,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "LS WebSocket smoke connect_attempts must be a positive integer.",
+        }
+    try:
+        reconnect_budget = int(reconnect_attempts)
+    except (TypeError, ValueError):
+        reconnect_budget = -1
+    if reconnect_budget < 0:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "reconnect_attempts",
+            "requested_value": reconnect_attempts,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "LS WebSocket smoke reconnect_attempts must be a non-negative integer.",
+        }
+    try:
+        connect_backoff = float(connect_backoff_seconds)
+    except (TypeError, ValueError):
+        connect_backoff = -1.0
+    if connect_backoff < 0:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "connect_backoff_seconds",
+            "requested_value": connect_backoff_seconds,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "LS WebSocket smoke connect_backoff_seconds must be a non-negative number.",
+        }
+    try:
+        reconnect_backoff = float(reconnect_backoff_seconds)
+    except (TypeError, ValueError):
+        reconnect_backoff = -1.0
+    if reconnect_backoff < 0:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "reconnect_backoff_seconds",
+            "requested_value": reconnect_backoff_seconds,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "LS WebSocket smoke reconnect_backoff_seconds must be a non-negative number.",
+        }
+    channel_key = str(channel or "").strip().lower()
+    channel_spec = LS_WEBSOCKET_CHANNELS.get(channel_key)
+    if channel_spec is None:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "channel",
+            "requested_value": channel,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": "LS WebSocket smoke channel must be a supported LS WebSocket channel.",
+        }
+    normalized_tr_key = str(tr_key or "").strip()
+    if channel_spec.get("tr_key") == "symbol":
+        normalized_tr_key = _normalize_kr_symbol(normalized_tr_key)
+    if channel_spec.get("tr_key") and not normalized_tr_key:
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "parameter": "tr_key",
+            "requested_value": tr_key,
+            "received_frames": 0,
+            "sample_payloads": [],
+            "subscription_events": [],
+            "frame_errors": [],
+            "reason": f"LS WebSocket channel {channel!r} requires a tr_key.",
+        }
+    if transport is None:
+        try:
+            transport = create_websocket_transport()
+        except KoreanConnectorConfigError as exc:
+            return {
+                "status": "not_configured",
+                "connector": CONNECTOR,
+                "profile": cfg.profile,
+                "missing": ["websockets"],
+                "network": "not_attempted",
+                "error": str(exc),
+            }
+
+    subscription = build_websocket_subscribe_message(normalized_tr_key, channel=channel_key, config=cfg, client=client)
+    header = dict(subscription["header"])
+    body = dict(subscription["body"])
+    uri = websocket_url(cfg)
+    socket, connection_attempts, connect_error = await _connect_websocket_with_retries(
+        transport,
+        uri,
+        connect_attempts=connect_attempt_count,
+        connect_backoff_seconds=connect_backoff,
+    )
+    total_connection_attempts = connection_attempts
+    reconnects = 0
+    if socket is None:
+        return {
+            "status": "connection_error",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "injected_transport" if injected_transport else "websocket_transport",
+            "uri": uri,
+            "auth": "access_token",
+            "subscription": {
+                "channel": channel,
+                "tr_cd": body["tr_cd"],
+                "tr_type": header["tr_type"],
+                "tr_key": body["tr_key"],
+            },
+            "received_frames": 0,
+            "sample_payloads": [],
+            "frame_errors": [],
+            "connection_attempts": total_connection_attempts,
+            "reconnects": reconnects,
+            "reason": f"LS WebSocket transport failed to connect after {connection_attempts} attempt(s): {connect_error}",
+        }
+    sample_payloads: list[dict[str, Any]] = []
+    subscription_events: list[dict[str, Any]] = []
+    frame_errors: list[dict[str, Any]] = []
+    received_frames = 0
+    try:
+        await socket.send_json(subscription)
+        while received_frames < message_target:
+            try:
+                raw = await _receive_websocket_message(socket, message_timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                return {
+                    "status": "timeout",
+                    "connector": CONNECTOR,
+                    "profile": cfg.profile,
+                    "environment": cfg.environment,
+                    "network": "injected_transport" if injected_transport else "websocket_transport",
+                    "uri": uri,
+                    "auth": "access_token",
+                    "subscription": {
+                        "channel": channel,
+                        "tr_cd": body["tr_cd"],
+                        "tr_type": header["tr_type"],
+                        "tr_key": body["tr_key"],
+                    },
+                    "received_frames": received_frames,
+                    "sample_payloads": sample_payloads,
+                    "subscription_events": subscription_events,
+                    "frame_errors": frame_errors,
+                    "connection_attempts": total_connection_attempts,
+                    "reconnects": reconnects,
+                    "timeout_seconds": timeout_seconds,
+                    "reason": "LS WebSocket smoke exceeded message_timeout while waiting for a frame.",
+                }
+            except Exception as exc:
+                if reconnects >= reconnect_budget:
+                    return {
+                        "status": "connection_error",
+                        "connector": CONNECTOR,
+                        "profile": cfg.profile,
+                        "environment": cfg.environment,
+                        "network": "injected_transport" if injected_transport else "websocket_transport",
+                        "uri": uri,
+                        "auth": "access_token",
+                        "subscription": {
+                            "channel": channel,
+                            "tr_cd": body["tr_cd"],
+                            "tr_type": header["tr_type"],
+                            "tr_key": body["tr_key"],
+                        },
+                        "received_frames": received_frames,
+                        "sample_payloads": sample_payloads,
+                        "subscription_events": subscription_events,
+                        "frame_errors": frame_errors,
+                        "connection_attempts": total_connection_attempts,
+                        "reconnects": reconnects,
+                        "reason": (
+                            "LS WebSocket transport disconnected while receiving a frame: "
+                            f"{str(exc) or exc.__class__.__name__}"
+                        ),
+                    }
+                await socket.close()
+                socket = None
+                if reconnect_backoff:
+                    await asyncio.sleep(reconnect_backoff)
+                next_socket, reconnect_connection_attempts, reconnect_error = await _connect_websocket_with_retries(
+                    transport,
+                    uri,
+                    connect_attempts=connect_attempt_count,
+                    connect_backoff_seconds=connect_backoff,
+                )
+                total_connection_attempts += reconnect_connection_attempts
+                reconnects += 1
+                if next_socket is None:
+                    return {
+                        "status": "connection_error",
+                        "connector": CONNECTOR,
+                        "profile": cfg.profile,
+                        "environment": cfg.environment,
+                        "network": "injected_transport" if injected_transport else "websocket_transport",
+                        "uri": uri,
+                        "auth": "access_token",
+                        "subscription": {
+                            "channel": channel,
+                            "tr_cd": body["tr_cd"],
+                            "tr_type": header["tr_type"],
+                            "tr_key": body["tr_key"],
+                        },
+                        "received_frames": received_frames,
+                        "sample_payloads": sample_payloads,
+                        "subscription_events": subscription_events,
+                        "frame_errors": frame_errors,
+                        "connection_attempts": total_connection_attempts,
+                        "reconnects": reconnects,
+                        "reason": (
+                            "LS WebSocket transport failed to reconnect after "
+                            f"{reconnect_connection_attempts} attempt(s): {reconnect_error}"
+                        ),
+                    }
+                socket = next_socket
+                await socket.send_json(subscription)
+                continue
+            received_frames += 1
+            parsed = parse_websocket_message(raw)
+            if parsed.get("type") == "error":
+                frame_error = _websocket_frame_error(parsed)
+                frame_errors.append(frame_error)
+                return {
+                    "status": "frame_error",
+                    "connector": CONNECTOR,
+                    "profile": cfg.profile,
+                    "environment": cfg.environment,
+                    "network": "injected_transport" if injected_transport else "websocket_transport",
+                    "uri": websocket_url(cfg),
+                    "auth": "access_token",
+                    "subscription": {
+                        "channel": channel,
+                        "tr_cd": body["tr_cd"],
+                        "tr_type": header["tr_type"],
+                        "tr_key": body["tr_key"],
+                    },
+                    "received_frames": received_frames,
+                    "sample_payloads": sample_payloads,
+                    "subscription_events": subscription_events,
+                    "frame_errors": frame_errors,
+                    "connection_attempts": total_connection_attempts,
+                    "reconnects": reconnects,
+                    "reason": f"LS WebSocket smoke received an invalid frame: {frame_error.get('error')}",
+                }
+            if parsed.get("type") == "system":
+                subscription_event = _websocket_subscription_event(parsed)
+                subscription_events.append(subscription_event)
+                if subscription_event.get("status") == "error":
+                    return {
+                        "status": "subscription_error",
+                        "connector": CONNECTOR,
+                        "profile": cfg.profile,
+                        "environment": cfg.environment,
+                        "network": "injected_transport" if injected_transport else "websocket_transport",
+                        "uri": websocket_url(cfg),
+                        "auth": "access_token",
+                        "subscription": {
+                            "channel": channel,
+                            "tr_cd": body["tr_cd"],
+                            "tr_type": header["tr_type"],
+                            "tr_key": body["tr_key"],
+                        },
+                        "received_frames": received_frames,
+                        "sample_payloads": sample_payloads,
+                        "subscription_events": subscription_events,
+                        "frame_errors": frame_errors,
+                        "connection_attempts": total_connection_attempts,
+                        "reconnects": reconnects,
+                        "reason": f"LS WebSocket subscription failed: {subscription_event.get('message')}",
+                    }
+                continue
+            sample_payloads.append(parsed)
+    finally:
+        if socket is not None:
+            await socket.close()
+
+    return {
+        "status": "ok",
+        "connector": CONNECTOR,
+        "profile": cfg.profile,
+        "environment": cfg.environment,
+        "network": "injected_transport" if injected_transport else "websocket_transport",
+        "uri": websocket_url(cfg),
+        "auth": "access_token",
+        "subscription": {
+            "channel": channel,
+            "tr_cd": body["tr_cd"],
+            "tr_type": header["tr_type"],
+            "tr_key": body["tr_key"],
+        },
+        "received_frames": received_frames,
+        "sample_payloads": sample_payloads,
+        "subscription_events": subscription_events,
+        "frame_errors": frame_errors,
+        "connection_attempts": total_connection_attempts,
+        "reconnects": reconnects,
+    }
+
+
+def _websockets_connect(url: str) -> Any:
+    try:
+        import websockets
+    except ModuleNotFoundError as exc:
+        raise KoreanConnectorConfigError("LS WebSocket transport requires the websockets package.") from exc
+    return websockets.connect(url)
+
+
+async def _connect_websocket_with_retries(
+    transport: Any,
+    uri: str,
+    *,
+    connect_attempts: int,
+    connect_backoff_seconds: float,
+) -> tuple[Any | None, int, str | None]:
+    try:
+        attempts = max(1, int(connect_attempts))
+    except (TypeError, ValueError):
+        attempts = 1
+    try:
+        backoff_seconds = max(0.0, float(connect_backoff_seconds))
+    except (TypeError, ValueError):
+        backoff_seconds = 0.0
+
+    last_error: str | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await transport.connect(uri), attempt, None
+        except Exception as exc:
+            last_error = str(exc) or exc.__class__.__name__
+            if attempt >= attempts:
+                return None, attempt, last_error
+            if backoff_seconds:
+                await asyncio.sleep(backoff_seconds)
+    return None, attempts, last_error
+
+
+async def _receive_websocket_message(socket: Any, *, message_timeout: float | None) -> Mapping[str, Any] | str | bytes:
+    receive = socket.receive()
+    if message_timeout is None:
+        return await receive
+    return await asyncio.wait_for(receive, timeout=max(0.0, float(message_timeout)))
+
+
+def _is_websocket_system_event(header: Mapping[str, Any], body: Mapping[str, Any]) -> bool:
+    keys = {"rsp_cd", "rsp_msg", "response_code", "msg", "msg1", "rt_cd", "error", "error_description"}
+    return any(key in header or key in body for key in keys)
+
+
+def _websocket_system_event(payload: Mapping[str, Any], header: Mapping[str, Any], body: Mapping[str, Any]) -> dict[str, Any]:
+    code = _first_value(
+        body.get("rsp_cd"),
+        body.get("response_code"),
+        body.get("rt_cd"),
+        header.get("rsp_cd"),
+        header.get("response_code"),
+        header.get("rt_cd"),
+    )
+    code_text = str(code).strip() if code is not None else None
+    message = _first_value(
+        body.get("rsp_msg"),
+        body.get("msg"),
+        body.get("msg1"),
+        body.get("error_description"),
+        body.get("error"),
+        header.get("rsp_msg"),
+        header.get("msg"),
+        header.get("msg1"),
+        header.get("error_description"),
+        header.get("error"),
+    )
+    return {
+        "type": "system",
+        "status": "ok" if str(code_text or "00000").strip() in ("00000", "0") else "error",
+        "tr_cd": _first_value(header.get("tr_cd"), body.get("tr_cd")),
+        "tr_type": _first_value(header.get("tr_type"), body.get("tr_type")),
+        "tr_key": _first_value(header.get("tr_key"), body.get("tr_key")),
+        "code": code_text,
+        "message": str(message).strip() if message is not None else None,
+        "raw": payload,
+    }
+
+
+def _websocket_subscription_event(parsed: Mapping[str, Any]) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "tr_cd": parsed.get("tr_cd"),
+        "tr_type": parsed.get("tr_type"),
+        "status": parsed.get("status"),
+        "code": parsed.get("code"),
+        "message": parsed.get("message"),
+        "tr_key_present": bool(parsed.get("tr_key_present") or parsed.get("tr_key")),
+    }
+    return {key: value for key, value in event.items() if value is not None}
+
+
+def _websocket_frame_error(parsed: Mapping[str, Any]) -> dict[str, Any]:
+    error = parsed.get("error") or parsed.get("message") or "invalid LS WebSocket frame"
+    return {"status": str(parsed.get("status") or "error"), "error": str(error)}
+
+
+def websocket_smoke_evidence(result: Mapping[str, Any], *, max_samples: int = 3) -> dict[str, Any]:
+    """Return a credential-safe evidence summary for an LS WebSocket smoke run."""
+
+    source = dict(result or {})
+    subscription = dict(source.get("subscription") or {}) if isinstance(source.get("subscription"), Mapping) else {}
+    channel = str(subscription.get("channel") or "").strip()
+    channel_spec = LS_WEBSOCKET_CHANNELS.get(channel.lower(), {})
+    safe_subscription: dict[str, Any] = {
+        "channel": subscription.get("channel"),
+        "tr_cd": subscription.get("tr_cd"),
+        "tr_type": subscription.get("tr_type"),
+        "tr_key_present": bool(subscription.get("tr_key")),
+    }
+    if channel_spec.get("tr_key"):
+        safe_subscription["tr_key_kind"] = channel_spec["tr_key"]
+
+    try:
+        sample_limit = max(0, int(max_samples))
+    except (TypeError, ValueError):
+        sample_limit = 3
+    samples = _as_list(source.get("sample_payloads"))
+    subscription_events = _as_list(source.get("subscription_events"))
+    frame_errors = _as_list(source.get("frame_errors"))
+
+    evidence = {
+        "status": source.get("status"),
+        "connector": source.get("connector") or CONNECTOR,
+        "profile": source.get("profile"),
+        "environment": source.get("environment"),
+        "network": source.get("network"),
+        "uri": source.get("uri"),
+        "auth": source.get("auth"),
+        "subscription": safe_subscription,
+        "received_frames": source.get("received_frames"),
+        "subscription_events": [_websocket_subscription_event(event) for event in subscription_events],
+        "frame_errors": [_websocket_frame_error(error) for error in frame_errors],
+        "sample_count": len(samples),
+        "sample_payloads": [_websocket_smoke_evidence_sample(sample) for sample in samples[:sample_limit]],
+    }
+    for key in ("reason", "timeout_seconds", "connection_attempts", "reconnects", "parameter", "requested_value"):
+        if key in source:
+            evidence[key] = source[key]
+    return evidence
+
+
+def write_websocket_smoke_evidence(
+    result: Mapping[str, Any],
+    path: str | Path,
+    *,
+    max_samples: int = 3,
+) -> Path:
+    """Write a credential-safe LS WebSocket smoke evidence JSON artifact."""
+
+    target = Path(path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    evidence = websocket_smoke_evidence(result, max_samples=max_samples)
+    target.write_text(json.dumps(evidence, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    return target
+
+
+async def run_websocket_smoke_with_evidence(
+    config: KoreanConnectorConfig | None = None,
+    *,
+    channel: str,
+    tr_key: str,
+    evidence_path: str | Path,
+    client: Any | None = None,
+    transport: Any | None = None,
+    max_messages: int = 3,
+    max_samples: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+    allow_broker_calls: bool = False,
+    allow_live: bool = False,
+) -> dict[str, Any]:
+    """Run a gated LS WebSocket smoke flow and write redacted evidence."""
+
+    cfg = config or load_config()
+    if not allow_broker_calls:
+        return {
+            "status": "not_run",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "reason": "LS WebSocket smoke requires allow_broker_calls=True before any credentialed broker call.",
+        }
+    if cfg.environment == "live" and not allow_live:
+        return {
+            "status": "blocked",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "reason": "Live LS WebSocket smoke requires allow_live=True.",
+        }
+
+    evidence_target = Path(evidence_path).expanduser()
+    if evidence_target.exists() and evidence_target.is_dir():
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "parameter": "evidence_path",
+            "requested_value": str(evidence_target),
+            "reason": "LS WebSocket smoke evidence_path must be a file path, not a directory.",
+        }
+    if evidence_target.parent.exists() and not evidence_target.parent.is_dir():
+        return {
+            "status": "invalid_request",
+            "connector": CONNECTOR,
+            "profile": cfg.profile,
+            "environment": cfg.environment,
+            "network": "not_attempted",
+            "evidence_path": None,
+            "parameter": "evidence_path",
+            "requested_value": str(evidence_target),
+            "reason": "LS WebSocket smoke evidence_path parent directory must be a directory.",
+        }
+
+    result = await run_websocket_smoke(
+        cfg,
+        channel=channel,
+        tr_key=tr_key,
+        client=client,
+        transport=transport,
+        max_messages=max_messages,
+        message_timeout=message_timeout,
+        connect_attempts=connect_attempts,
+        connect_backoff_seconds=connect_backoff_seconds,
+        reconnect_attempts=reconnect_attempts,
+        reconnect_backoff_seconds=reconnect_backoff_seconds,
+    )
+    written = write_websocket_smoke_evidence(result, evidence_target, max_samples=max_samples)
+    evidence = websocket_smoke_evidence(result, max_samples=max_samples)
+    evidence["evidence_path"] = str(written)
+    return evidence
 
 
 def place_order(
@@ -709,6 +1413,44 @@ def _first_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, list) and value and isinstance(value[0], Mapping):
         return dict(value[0])
     return {}
+
+
+def _first_value(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _websocket_smoke_evidence_sample(sample: Mapping[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key in ("status", "channel", "tr_cd"):
+        if key in sample:
+            safe[key] = sample.get(key)
+    if sample.get("symbol"):
+        safe["symbol_present"] = True
+
+    quote = sample.get("quote")
+    if isinstance(quote, Mapping):
+        safe["quote_keys"] = sorted(str(key) for key in quote if key != "raw")
+
+    orderbook = sample.get("orderbook")
+    if isinstance(orderbook, Mapping):
+        safe["orderbook_keys"] = sorted(str(key) for key in orderbook if key != "raw")
+
+    order = sample.get("order")
+    if isinstance(order, Mapping):
+        safe["order_keys"] = sorted(str(key) for key in order if key != "raw")
+
+    raw = sample.get("raw")
+    if isinstance(raw, Mapping):
+        header = raw.get("header")
+        body = raw.get("body")
+        if isinstance(header, Mapping):
+            safe["raw_header_keys"] = sorted(str(key) for key in header)
+        if isinstance(body, Mapping):
+            safe["raw_body_keys"] = sorted(str(key) for key in body)
+    return safe
 
 
 def _websocket_kind(tr_cd: str) -> str:

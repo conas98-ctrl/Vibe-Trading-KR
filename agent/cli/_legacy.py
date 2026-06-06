@@ -3818,6 +3818,51 @@ def cmd_connector_kis_websocket_smoke(
     return EXIT_RUN_FAILED
 
 
+def cmd_connector_ls_websocket_smoke(
+    profile_id: Optional[str] = None,
+    *,
+    channel: str,
+    tr_key: str,
+    evidence_path: Path,
+    max_messages: int = 3,
+    message_timeout: float | None = None,
+    connect_attempts: int = 1,
+    connect_backoff_seconds: float = 0.0,
+    reconnect_attempts: int = 0,
+    reconnect_backoff_seconds: float = 0.0,
+    max_samples: int = 3,
+    allow_broker_calls: bool = False,
+    allow_live: bool = False,
+) -> int:
+    """Run or plan a gated LS WebSocket smoke evidence capture."""
+    from src.trading.service import run_websocket_smoke_with_evidence
+
+    try:
+        result = run_websocket_smoke_with_evidence(
+            _profile_id(profile_id),
+            channel=channel,
+            tr_key=tr_key,
+            evidence_path=evidence_path,
+            max_messages=max_messages,
+            message_timeout=message_timeout,
+            connect_attempts=connect_attempts,
+            connect_backoff_seconds=connect_backoff_seconds,
+            reconnect_attempts=reconnect_attempts,
+            reconnect_backoff_seconds=reconnect_backoff_seconds,
+            max_samples=max_samples,
+            allow_broker_calls=allow_broker_calls,
+            allow_live=allow_live,
+        )
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]LS WebSocket smoke failed:[/red] {rich_escape(str(exc))}")
+        return EXIT_RUN_FAILED
+
+    console.print_json(data=result)
+    if result.get("status") in {"ok", "not_run", "blocked", "planned"}:
+        return EXIT_SUCCESS
+    return EXIT_RUN_FAILED
+
+
 def _write_connector_smoke_output(payload: dict[str, Any], output_path: Path) -> None:
     """Write Korean broker smoke evidence JSON with private file permissions."""
     output_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -4227,6 +4272,22 @@ def _dispatch_connector(args: argparse.Namespace) -> int:
         return cmd_connector_kiwoom_websocket_channels()
     if sub == "ls-websocket-channels":
         return cmd_connector_ls_websocket_channels()
+    if sub == "ls-websocket-smoke":
+        return cmd_connector_ls_websocket_smoke(
+            args.profile,
+            channel=args.channel,
+            tr_key=args.tr_key,
+            evidence_path=args.evidence_path,
+            max_messages=args.max_messages,
+            message_timeout=args.message_timeout,
+            connect_attempts=args.connect_attempts,
+            connect_backoff_seconds=args.connect_backoff_seconds,
+            reconnect_attempts=args.reconnect_attempts,
+            reconnect_backoff_seconds=args.reconnect_backoff_seconds,
+            max_samples=args.max_samples,
+            allow_broker_calls=args.allow_broker_calls,
+            allow_live=args.allow_live,
+        )
     if sub == "authorize":
         return cmd_connector_authorize(args.profile)
     if sub == "status":
@@ -4784,6 +4845,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "ls-websocket-channels",
         help="List supported LS WebSocket channels without broker calls",
     )
+
+    connector_ls_ws_smoke = connector_subparsers.add_parser(
+        "ls-websocket-smoke",
+        help="Run or plan a gated LS WebSocket smoke evidence capture",
+    )
+    from src.trading.connectors.ls.sdk import LS_WEBSOCKET_CHANNELS
+
+    connector_ls_ws_smoke.add_argument("--profile", default=None, help="LS SDK profile id (default: selected)")
+    connector_ls_ws_smoke.add_argument(
+        "--channel",
+        choices=sorted(LS_WEBSOCKET_CHANNELS),
+        required=True,
+        help="LS WebSocket channel, e.g. kospi_trade",
+    )
+    connector_ls_ws_smoke.add_argument("--tr-key", dest="tr_key", required=True, help="LS subscription key, e.g. 005930")
+    connector_ls_ws_smoke.add_argument("--evidence-path", type=Path, required=True, help="Redacted JSON evidence file path")
+    connector_ls_ws_smoke.add_argument("--max-messages", type=int, default=3, help="Maximum WebSocket messages to sample")
+    connector_ls_ws_smoke.add_argument("--message-timeout", type=float, default=None, help="Seconds to wait for each message")
+    connector_ls_ws_smoke.add_argument("--connect-attempts", type=int, default=1, help="Connection attempts before failing")
+    connector_ls_ws_smoke.add_argument("--connect-backoff-seconds", type=float, default=0.0, help="Delay between connection attempts")
+    connector_ls_ws_smoke.add_argument("--reconnect-attempts", type=int, default=0, help="Reconnect attempts after receive drops")
+    connector_ls_ws_smoke.add_argument("--reconnect-backoff-seconds", type=float, default=0.0, help="Delay between reconnect attempts")
+    connector_ls_ws_smoke.add_argument("--max-samples", type=int, default=3, help="Maximum redacted samples to keep in evidence")
+    connector_ls_ws_smoke.add_argument("--allow-broker-calls", action="store_true", help="Actually call read-only LS WebSocket APIs")
+    connector_ls_ws_smoke.add_argument("--allow-live", action="store_true", help="Allow live LS checks in addition to --allow-broker-calls")
 
     for name, help_text in (
         ("start", "Start the selected live connector runner"),

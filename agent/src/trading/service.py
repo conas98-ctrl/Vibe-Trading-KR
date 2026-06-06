@@ -224,7 +224,7 @@ def run_websocket_smoke_with_evidence(
 ) -> dict[str, Any]:
     """Run a profile-scoped WebSocket smoke flow and write redacted evidence."""
     profile = profile_by_id(profile_id)
-    if profile.connector not in {"kiwoom", "kis"} or profile.transport != "broker_sdk":
+    if profile.connector not in {"kiwoom", "kis", "ls"} or profile.transport != "broker_sdk":
         return _unsupported(profile, "websocket_smoke.run")
 
     module = _sdk_module(profile.connector)
