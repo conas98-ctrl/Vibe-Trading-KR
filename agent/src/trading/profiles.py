@@ -9,6 +9,7 @@ from src.config.paths import get_runtime_root
 from src.trading.connectors.alpaca.profiles import ALPACA_PROFILES
 from src.trading.connectors.binance.profiles import BINANCE_PROFILES
 from src.trading.connectors.daishin_cybos.profiles import DAISHIN_CYBOS_PROFILES
+from src.trading.connectors.db.profiles import DB_PROFILES
 from src.trading.connectors.eugene_champion.profiles import EUGENE_CHAMPION_PROFILES
 from src.trading.connectors.futu.profiles import FUTU_PROFILES
 from src.trading.connectors.ibkr.profiles import IBKR_PROFILES
@@ -38,6 +39,7 @@ BUILTIN_PROFILES: tuple[TradingProfile, ...] = (
     *FUTU_PROFILES,
     *KIS_PROFILES,
     *LS_PROFILES,
+    *DB_PROFILES,
     *KIWOOM_PROFILES,
     *KIWOOM_OPENAPI_PROFILES,
     *DAISHIN_CYBOS_PROFILES,

@@ -35,6 +35,10 @@ def test_korean_broker_profiles_registered() -> None:
         "ls-live-sdk-readonly",
         "ls-paper-trade",
         "ls-live-trade",
+        "db-paper-sdk",
+        "db-live-sdk-readonly",
+        "db-paper-trade",
+        "db-live-trade",
         "kiwoom-paper-sdk",
         "kiwoom-live-sdk-readonly",
         "kiwoom-paper-trade",
@@ -53,6 +57,7 @@ def test_korean_broker_profiles_registered() -> None:
         ("kis-paper-sdk", "kis", "broker_sdk", True),
         ("kis-live-trade", "kis", "broker_sdk", False),
         ("ls-paper-sdk", "ls", "broker_sdk", True),
+        ("db-live-trade", "db", "broker_sdk", False),
         ("kiwoom-live-trade", "kiwoom", "broker_sdk", False),
         ("kiwoom-openapi-live-bridge-readonly", "kiwoom-openapi", "local_bridge", True),
         ("daishin-cybos-live-bridge-readonly", "daishin-cybos", "local_bridge", True),
@@ -75,6 +80,7 @@ def test_korean_profiles_carry_connector_transport_and_trade_gate(profile_id, co
     [
         ("kis", "kis-paper-sdk"),
         ("ls", "ls-paper-sdk"),
+        ("db", "db-paper-sdk"),
         ("kiwoom", "kiwoom-paper-sdk"),
         ("kiwoom-openapi", "kiwoom-openapi-live-bridge-readonly"),
         ("daishin-cybos", "daishin-cybos-live-bridge-readonly"),
@@ -103,6 +109,7 @@ def test_korean_connector_read_write_classification_maps() -> None:
     from src.trading.connectors.kis.classification import KIS_TOOL_CLASS
     from src.trading.connectors.kiwoom.classification import KIWOOM_TOOL_CLASS
     from src.trading.connectors.ls.classification import LS_TOOL_CLASS
+    from src.trading.connectors.db.classification import DB_TOOL_CLASS
 
     assert KIS_TOOL_CLASS["inquire_price"] is ToolClass.READ
     assert KIS_TOOL_CLASS["ccnl_notice"] is ToolClass.READ
@@ -110,5 +117,7 @@ def test_korean_connector_read_write_classification_maps() -> None:
     assert KIS_TOOL_CLASS["order_cash"] is ToolClass.WRITE
     assert LS_TOOL_CLASS["stock_quote"] is ToolClass.READ
     assert LS_TOOL_CLASS["stock_order"] is ToolClass.WRITE
+    assert DB_TOOL_CLASS["stock_quote"] is ToolClass.READ
+    assert DB_TOOL_CLASS["stock_order"] is ToolClass.WRITE
     assert KIWOOM_TOOL_CLASS["ka10001"] is ToolClass.READ
     assert KIWOOM_TOOL_CLASS["kt10000"] is ToolClass.WRITE
