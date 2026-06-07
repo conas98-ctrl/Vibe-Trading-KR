@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://pinehill99.github.io/Vibe-Trading-KR/sitemap.xml

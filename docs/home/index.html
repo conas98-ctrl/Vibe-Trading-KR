@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem("vibetrading-theme");
+        var resolved = stored === "dark" || stored === "light"
+          ? stored
+          : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", resolved);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vibe-Trading-KR — 한국 시장 AI 트레이딩 에이전트 | Vibe Trading Korea</title>
+  <meta name="description" content="한국 증권사 API(KIS·LS·DB·키움) 커넥터와 KRX 백테스트를 갖춘 오픈소스 AI 트레이딩 에이전트. Vibe-Trading의 한국 시장 포크. Korean stock market AI agent with KIS, Kiwoom, LS, DB broker connectors and KRX backtesting.">
+  <meta name="keywords" content="vibe trading korea,vibe trading kr,한국 바이브 트레이딩,vibe-trading-kr,한국 주식 자동매매,KIS API,키움 API,한국투자증권 API,LS증권,DB증권,KRX,KOSPI,KOSDAQ,백테스트,AI 트레이딩,알고리즘 트레이딩,퀀트,python trading bot korea">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <meta name="author" content="Vibe-Trading-KR (fork of HKUDS/Vibe-Trading)">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Vibe-Trading-KR">
+  <meta property="og:title" content="Vibe-Trading-KR — 한국 시장 AI 트레이딩 에이전트 | Vibe Trading Korea">
+  <meta property="og:description" content="한국 증권사 API(KIS·키움·LS·DB) 커넥터와 KRX 백테스트를 갖춘 오픈소스 AI 트레이딩 에이전트. Vibe-Trading Korea fork.">
+  <meta property="og:image" content="https://pinehill99.github.io/Vibe-Trading-KR/assets/icon.png">
+  <meta property="og:url" content="https://pinehill99.github.io/Vibe-Trading-KR/home/">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Vibe-Trading-KR — 한국 시장 AI 트레이딩 에이전트">
+  <meta name="twitter:description" content="한국 증권사 API(KIS·키움·LS·DB) 커넥터와 KRX 백테스트. Vibe Trading Korea fork.">
+  <meta name="twitter:image" content="https://pinehill99.github.io/Vibe-Trading-KR/assets/icon.png">
+  <link rel="canonical" href="https://pinehill99.github.io/Vibe-Trading-KR/home/">
+  <link rel="alternate" hreflang="ko" href="https://pinehill99.github.io/Vibe-Trading-KR/home/">
+  <link rel="alternate" hreflang="en" href="https://pinehill99.github.io/Vibe-Trading-KR/home/">
+  <link rel="alternate" hreflang="x-default" href="https://pinehill99.github.io/Vibe-Trading-KR/home/">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Vibe-Trading-KR",
+    "alternateName": ["Vibe Trading Korea", "한국 바이브 트레이딩", "vibe trading kr"],
+    "description": "한국 증권사 API(KIS·키움·LS·DB) 커넥터와 KRX 백테스트를 갖춘 오픈소스 AI 트레이딩 에이전트",
+    "url": "https://pinehill99.github.io/Vibe-Trading-KR/",
+    "downloadUrl": "https://github.com/pinehill99/Vibe-Trading-KR",
+    "applicationCategory": "FinanceApplication",
+    "operatingSystem": "Linux, macOS, Windows",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "softwareVersion": "0.1.0",
+    "keywords": "vibe trading korea, KIS API, 키움 API, KRX, KOSPI, 자동매매, 백테스트, AI trading agent",
+    "inLanguage": ["ko", "en"],
+    "author": {
+      "@type": "Person",
+      "name": "pinehill99",
+      "url": "https://github.com/pinehill99"
+    },
+    "isBasedOn": {
+      "@type": "SoftwareApplication",
+      "name": "Vibe-Trading",
+      "url": "https://github.com/HKUDS/Vibe-Trading"
+    }
+  }
+  </script>
+  <link rel="icon" type="image/png" href="/Vibe-Trading-KR/assets/icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,750&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/Vibe-Trading-KR/styles.css">
+  <script type="module" src="/Vibe-Trading-KR/main.js"></script>
+</head>
+<body>
+  <header class="site-header" id="site-header">
+    <div class="site-header__inner">
+      <a class="brand" href="/Vibe-Trading-KR/home/" aria-label="Vibe-Trading home">
+        <img class="brand__mark" src="/Vibe-Trading-KR/assets/icon.png" alt="" width="40" height="40">
+        <span class="brand__text">Vibe-Trading-KR</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="/Vibe-Trading-KR/docs/" data-i18n="nav.docs">Docs</a>
+        <a href="/Vibe-Trading-KR/tutorials/" data-i18n="nav.tutorials">Tutorials</a>
+        <a href="/Vibe-Trading-KR/alpha-library/" data-i18n="nav.alpha">Alpha Library</a>
+        <a href="/Vibe-Trading-KR/research-lab/" data-i18n="nav.lab">Research Lab</a>
+        <a href="https://github.com/pinehill99/Vibe-Trading-KR" data-i18n="nav.source">Source</a>
+      </nav>
+      <div class="site-actions">
+        <a class="star-pill" href="https://github.com/pinehill99/Vibe-Trading-KR" aria-label="Vibe-Trading on GitHub">
+          <span aria-hidden="true">Star</span>
+          <strong id="star-count">--</strong>
+        </a>
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="Toggle color theme">
+          <span class="theme-icon" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero__content">
+        <p class="eyebrow" data-i18n="hero.eyebrow">Open-source finance research agent · 🇰🇷 Korean market fork</p>
+        <h1 data-i18n-html="hero.title">Turn Korean market questions into runnable research.</h1>
+        <p class="hero__lead" data-i18n="hero.lead">Vibe-Trading-KR is the Korean-market fork of Vibe-Trading — natural-language research over market data, backtests, and swarm analysis, plus Korean broker connectors (KIS · LS · DB · Kiwoom) and KRX backtesting.</p>
+        <div class="hero__actions">
+          <a class="button button--primary" href="/Vibe-Trading-KR/docs/" data-i18n="hero.cta_docs">Read the docs</a>
+          <a class="button button--ghost" href="https://github.com/pinehill99/Vibe-Trading-KR" data-i18n="hero.cta_source">View source</a>
+        </div>
+      </div>
+      <div class="hero__visual" aria-label="Vibe-Trading research terminal preview">
+        <div class="terminal">
+          <div class="terminal__bar">
+            <span></span><span></span><span></span>
+            <strong>vibe-trading</strong>
+          </div>
+          <div class="terminal__body">
+            <p><span class="prompt">$</span> vibe-trading run -p "Backtest 005930.KS 20/50 MA for 2024"</p>
+            <p class="muted">route: kr_equity data -> strategy -> backtest -> run card</p>
+            <p><span class="ok">return</span> +18.6% <span class="warn">max drawdown</span> -7.4%</p>
+            <p><span class="prompt">$</span> vibe-trading --swarm-run investment_committee</p>
+            <p class="muted">workers: macro, quant, risk, catalyst</p>
+            <p><span class="ok">report</span> saved with evidence, metrics, and caveats</p>
+          </div>
+        </div>
+        <div class="market-strip" aria-hidden="true">
+          <span>005930.KS</span><span>035720.KQ</span><span>^KS11</span><span>BTC-USDT</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="install-band" aria-labelledby="install-title">
+      <div class="section-head">
+        <p class="eyebrow" data-i18n="install.eyebrow">Install</p>
+        <h2 id="install-title" data-i18n="install.title">One command to start a research workspace.</h2>
+      </div>
+      <div class="install-panel">
+        <div class="tabs" role="tablist" aria-label="Installation methods">
+          <button role="tab" aria-selected="true" aria-controls="install-pypi" id="tab-pypi" data-tab="pypi">PyPI</button>
+          <button role="tab" aria-selected="false" aria-controls="install-uv" id="tab-uv" data-tab="uv">uv</button>
+          <button role="tab" aria-selected="false" aria-controls="install-source" id="tab-source" data-tab="source">Source</button>
+        </div>
+        <pre id="install-pypi" role="tabpanel" aria-labelledby="tab-pypi"><code># upstream core only (no KR connectors)
+pip install vibe-trading-ai
+vibe-trading init
+vibe-trading</code></pre>
+        <pre id="install-uv" role="tabpanel" aria-labelledby="tab-uv" hidden><code># upstream core only (no KR connectors)
+uv tool install vibe-trading-ai
+vibe-trading init
+vibe-trading serve --port 8899</code></pre>
+        <pre id="install-source" role="tabpanel" aria-labelledby="tab-source" hidden><code># Korean fork — includes KIS / LS / DB / Kiwoom connectors
+git clone https://github.com/pinehill99/Vibe-Trading-KR
+cd Vibe-Trading-KR
+pip install -e .
+vibe-trading</code></pre>
+      </div>
+    </section>
+
+    <section class="feature-band" aria-labelledby="korea-title">
+      <div class="section-head">
+        <p class="eyebrow" data-i18n="korea.eyebrow">🇰🇷 Korean market</p>
+        <h2 id="korea-title" data-i18n="korea.title">Korean broker connectors &amp; KRX backtesting.</h2>
+      </div>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3 data-i18n="korea.card1.title">Broker connectors</h3>
+          <p data-i18n-html="korea.card1.body">KIS · LS · DB · Kiwoom REST registered as <code>broker_sdk</code> profiles; Kiwoom OpenAPI+ and Daishin CYBOS as Windows local bridges. Status is tracked conservatively — real-account orders stay behind mandate, kill switch, and audit gates.</p>
+          <p><a href="https://github.com/pinehill99/Vibe-Trading-KR/blob/main/wiki/docs/ko/broker-api-matrix.md" data-i18n="korea.card1.link">Broker API matrix →</a></p>
+        </article>
+        <article class="feature-card">
+          <h3 data-i18n="korea.card2.title">KRX backtesting</h3>
+          <p data-i18n-html="korea.card2.body"><code>005930.KS</code>, <code>035720.KQ</code>, <code>KRX:005930</code> route to <code>kr_equity</code>. KRX 1-share lot and ±30% daily limit modeled; benchmark resolves to KOSPI <code>^KS11</code>.</p>
+        </article>
+        <article class="feature-card">
+          <h3 data-i18n="korea.card3.title">Credentials &amp; safety</h3>
+          <p data-i18n-html="korea.card3.body">Broker keys come from environment variables; per-connector config is stored under <code>~/.vibe-trading</code> with <code>0600</code> permissions. Live order paths require credentialed smoke evidence first.</p>
+          <p><a href="https://github.com/pinehill99/Vibe-Trading-KR/blob/main/wiki/docs/ko/credential-smoke-runbook.md" data-i18n="korea.card3.link">Credential smoke runbook →</a></p>
+        </article>
+      </div>
+    </section>
+
+    <section class="knowledge-band" aria-labelledby="knowledge-title">
+      <div class="section-head">
+        <p class="eyebrow" data-i18n="wiki.eyebrow">Wiki</p>
+        <h2 id="knowledge-title" data-i18n="wiki.title">Explore Vibe-Trading-KR.</h2>
+      </div>
+      <div class="knowledge-grid">
+        <a class="knowledge-card" href="/Vibe-Trading-KR/docs/">
+          <strong data-i18n="card.docs">Product Docs</strong>
+        </a>
+        <a class="knowledge-card" href="/Vibe-Trading-KR/tutorials/">
+          <strong data-i18n="card.tutorials">Hands-on AI Quant</strong>
+        </a>
+        <a class="knowledge-card" href="/Vibe-Trading-KR/alpha-library/">
+          <strong data-i18n="card.alpha">Alpha Library</strong>
+        </a>
+        <a class="knowledge-card" href="/Vibe-Trading-KR/research-lab/">
+          <strong data-i18n="card.lab">Research Lab</strong>
+        </a>
+      </div>
+    </section>
+
+    <section class="workflow" aria-labelledby="workflow-title">
+      <div class="section-head">
+        <p class="eyebrow" data-i18n="loop.eyebrow">Research loop</p>
+        <h2 id="workflow-title" data-i18n="loop.title">Every answer keeps the trail inspectable.</h2>
+      </div>
+      <div class="step-grid">
+        <article>
+          <span>01</span>
+          <h3 data-i18n="loop.route.title">Route</h3>
+          <p data-i18n="loop.route.body">Select skills, data sources, tools, and swarm teams from the request.</p>
+        </article>
+        <article>
+          <span>02</span>
+          <h3 data-i18n="loop.ground.title">Ground</h3>
+          <p data-i18n="loop.ground.body">Fetch market data, documents, URLs, broker journals, or local files at runtime.</p>
+        </article>
+        <article>
+          <span>03</span>
+          <h3 data-i18n="loop.test.title">Test</h3>
+          <p data-i18n="loop.test.body">Run backtests, factor analysis, options checks, validation, and report generation.</p>
+        </article>
+        <article>
+          <span>04</span>
+          <h3 data-i18n="loop.deliver.title">Deliver</h3>
+          <p data-i18n="loop.deliver.body">Return run cards, exports, reports, tool traces, and caveats for the next session.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="feature-band" aria-labelledby="features-title">
+      <div class="section-head">
+        <p class="eyebrow" data-i18n="cap.eyebrow">Capabilities</p>
+        <h2 id="features-title" data-i18n="cap.title">Built for finance research, not brokerage execution.</h2>
+      </div>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <img src="/Vibe-Trading-KR/assets/feature-self-improving-trading-agent.png" alt="Self-improving trading agent">
+          <h3 data-i18n="cap.harness.title">Agent Harness</h3>
+          <p data-i18n="cap.harness.body">Persistent memory, session search, editable skills, context compression, and tool-batched research runs.</p>
+        </article>
+        <article class="feature-card">
+          <img src="/Vibe-Trading-KR/assets/feature-cross-market-data-backtesting.png" alt="Cross-market data and backtesting">
+          <h3 data-i18n="cap.backtest.title">Backtesting</h3>
+          <p data-i18n="cap.backtest.body">Seven engines across equities, crypto, futures, forex, composites, and options portfolios.</p>
+        </article>
+        <article class="feature-card">
+          <img src="/Vibe-Trading-KR/assets/feature-multi-agent-trading-teams.png" alt="Multi-agent trading teams">
+          <h3 data-i18n="cap.swarm.title">Swarm Teams</h3>
+          <p data-i18n="cap.swarm.body">Investment committee, quant desk, risk review, macro, crypto, and other preset research teams.</p>
+        </article>
+        <article class="feature-card">
+          <img src="/Vibe-Trading-KR/assets/feature-shadow-account.png" alt="Shadow Account workflow">
+          <h3 data-i18n="cap.shadow.title">Shadow Account</h3>
+          <p data-i18n="cap.shadow.body">Parse broker journals, extract implicit rules, run counterfactual backtests, and render audit reports.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="safety-band" aria-label="Research only">
+      <div>
+        <p class="eyebrow" data-i18n="safety.eyebrow">Boundary</p>
+        <h2 data-i18n="safety.title">No live trading.</h2>
+      </div>
+      <p data-i18n="safety.body">Vibe-Trading is for research, simulation, and backtesting. It does not execute live trades and does not provide investment advice.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>Vibe-Trading-KR Wiki</span>
+    <a href="/Vibe-Trading-KR/docs/" data-i18n="nav.docs">Docs</a>
+    <a href="/Vibe-Trading-KR/tutorials/" data-i18n="nav.tutorials">Tutorials</a>
+    <a href="/Vibe-Trading-KR/alpha-library/" data-i18n="nav.alpha">Alpha Library</a>
+    <a href="/Vibe-Trading-KR/research-lab/" data-i18n="nav.lab">Research Lab</a>
+    <a href="https://github.com/pinehill99/Vibe-Trading-KR">GitHub</a>
+    <a href="https://pypi.org/project/vibe-trading-ai/">PyPI</a>
+  </footer>
+</body>
+</html>
