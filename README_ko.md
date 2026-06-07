@@ -6,12 +6,14 @@
   <img src="assets/icon.png" width="120" alt="Vibe-Trading 로고"/>
 </p>
 
-<h1 align="center">Vibe-Trading-KR: 한국 시장을 위한 개인 트레이딩 에이전트</h1>
+<h1 align="center">Vibe-Trading-KR — 한국 주식 자동매매 AI 에이전트 | 한국 바이브 트레이딩</h1>
 
 <p align="center">
-  <b>한 번의 명령으로 에이전트에 종합적인 트레이딩 역량을 더하세요</b>
+  <b>한 번의 명령으로 에이전트에 종합적인 한국 주식·KRX 트레이딩 역량을 더하세요</b>
   <br>
-  🇰🇷 <b><a href="https://github.com/HKUDS/Vibe-Trading">Vibe-Trading</a>의 한국 시장 포크</b> — 원본 에이전트 위에 한국 증권사 커넥터(KIS · LS · DB · 키움)와 KRX 백테스트를 추가했습니다
+  🇰🇷 <b><a href="https://github.com/HKUDS/Vibe-Trading">Vibe-Trading</a>의 한국 시장 포크</b> (Vibe Trading Korea / vibe trading kr / 한국 바이브 트레이딩)
+  <br>
+  한국투자증권(KIS) · LS증권 · DB증권 · 키움증권 OpenAPI 커넥터 + KRX·KOSPI·KOSDAQ 백테스트
 </p>
 
 <p align="center">
