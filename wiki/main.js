@@ -86,9 +86,31 @@ function initInstallTabs() {
   }
 }
 
-async function applyLocale() {
+const LANG_KEY = "vibetrading-lang";
+const SUPPORTED_LANGS = ["en", "ko"];
+
+function getLang() {
   try {
-    const response = await fetch(new URL("locales/en.json", import.meta.url));
+    const saved = localStorage.getItem(LANG_KEY);
+    if (SUPPORTED_LANGS.includes(saved)) return saved;
+  } catch {
+    /* ignore */
+  }
+  return (navigator.language || "en").toLowerCase().startsWith("ko") ? "ko" : "en";
+}
+
+function setLang(lang) {
+  try {
+    localStorage.setItem(LANG_KEY, lang);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function applyLocale(lang = getLang()) {
+  document.documentElement.lang = lang;
+  try {
+    const response = await fetch(new URL(`locales/${lang}.json`, import.meta.url));
     if (!response.ok) return;
     const messages = await response.json();
     document.querySelectorAll("[data-i18n]").forEach((el) => {
@@ -99,9 +121,28 @@ async function applyLocale() {
       const key = el.getAttribute("data-i18n-html");
       if (key && messages[key] != null) el.innerHTML = messages[key];
     });
+    const toggle = document.getElementById("lang-toggle");
+    if (toggle && messages["lang.toggle"] != null) toggle.textContent = messages["lang.toggle"];
   } catch {
     /* static fallback text is already in the HTML */
   }
+}
+
+function initLangToggle() {
+  const actions = document.querySelector(".site-actions");
+  if (!actions || document.getElementById("lang-toggle")) return;
+  const btn = document.createElement("button");
+  btn.id = "lang-toggle";
+  btn.type = "button";
+  btn.className = "lang-toggle";
+  btn.setAttribute("aria-label", "Toggle language / 언어 전환");
+  btn.textContent = getLang() === "ko" ? "English" : "한국어";
+  btn.addEventListener("click", () => {
+    const next = getLang() === "ko" ? "en" : "ko";
+    setLang(next);
+    applyLocale(next);
+  });
+  actions.insertBefore(btn, actions.firstChild);
 }
 
 function initHeaderScroll() {
@@ -116,4 +157,5 @@ initTheme();
 initStars();
 initInstallTabs();
 initHeaderScroll();
+initLangToggle();
 applyLocale();
