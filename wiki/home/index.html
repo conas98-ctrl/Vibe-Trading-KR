@@ -98,8 +98,8 @@
 
     <section class="install-band" aria-labelledby="install-title">
       <div class="section-head">
-        <p class="eyebrow">Install</p>
-        <h2 id="install-title">One command to start a research workspace.</h2>
+        <p class="eyebrow" data-i18n="install.eyebrow">Install</p>
+        <h2 id="install-title" data-i18n="install.title">One command to start a research workspace.</h2>
       </div>
       <div class="install-panel">
         <div class="tabs" role="tablist" aria-label="Installation methods">
@@ -125,121 +125,121 @@ vibe-trading</code></pre>
 
     <section class="feature-band" aria-labelledby="korea-title">
       <div class="section-head">
-        <p class="eyebrow">🇰🇷 Korean market</p>
-        <h2 id="korea-title">Korean broker connectors &amp; KRX backtesting.</h2>
+        <p class="eyebrow" data-i18n="korea.eyebrow">🇰🇷 Korean market</p>
+        <h2 id="korea-title" data-i18n="korea.title">Korean broker connectors &amp; KRX backtesting.</h2>
       </div>
       <div class="feature-grid">
         <article class="feature-card">
-          <h3>Broker connectors</h3>
-          <p>KIS · LS · DB · Kiwoom REST registered as <code>broker_sdk</code> profiles; Kiwoom OpenAPI+ and Daishin CYBOS as Windows local bridges. Status is tracked conservatively — real-account orders stay behind mandate, kill switch, and audit gates.</p>
-          <p><a href="https://github.com/pinehill99/Vibe-Trading-KR/blob/main/wiki/docs/ko/broker-api-matrix.md">Broker API matrix →</a></p>
+          <h3 data-i18n="korea.card1.title">Broker connectors</h3>
+          <p data-i18n-html="korea.card1.body">KIS · LS · DB · Kiwoom REST registered as <code>broker_sdk</code> profiles; Kiwoom OpenAPI+ and Daishin CYBOS as Windows local bridges. Status is tracked conservatively — real-account orders stay behind mandate, kill switch, and audit gates.</p>
+          <p><a href="https://github.com/pinehill99/Vibe-Trading-KR/blob/main/wiki/docs/ko/broker-api-matrix.md" data-i18n="korea.card1.link">Broker API matrix →</a></p>
         </article>
         <article class="feature-card">
-          <h3>KRX backtesting</h3>
-          <p><code>005930.KS</code>, <code>035720.KQ</code>, <code>KRX:005930</code> route to <code>kr_equity</code>. KRX 1-share lot and ±30% daily limit modeled; benchmark resolves to KOSPI <code>^KS11</code>.</p>
+          <h3 data-i18n="korea.card2.title">KRX backtesting</h3>
+          <p data-i18n-html="korea.card2.body"><code>005930.KS</code>, <code>035720.KQ</code>, <code>KRX:005930</code> route to <code>kr_equity</code>. KRX 1-share lot and ±30% daily limit modeled; benchmark resolves to KOSPI <code>^KS11</code>.</p>
         </article>
         <article class="feature-card">
-          <h3>Credentials &amp; safety</h3>
-          <p>Broker keys come from environment variables; per-connector config is stored under <code>~/.vibe-trading</code> with <code>0600</code> permissions. Live order paths require credentialed smoke evidence first.</p>
-          <p><a href="https://github.com/pinehill99/Vibe-Trading-KR/blob/main/wiki/docs/ko/credential-smoke-runbook.md">Credential smoke runbook →</a></p>
+          <h3 data-i18n="korea.card3.title">Credentials &amp; safety</h3>
+          <p data-i18n-html="korea.card3.body">Broker keys come from environment variables; per-connector config is stored under <code>~/.vibe-trading</code> with <code>0600</code> permissions. Live order paths require credentialed smoke evidence first.</p>
+          <p><a href="https://github.com/pinehill99/Vibe-Trading-KR/blob/main/wiki/docs/ko/credential-smoke-runbook.md" data-i18n="korea.card3.link">Credential smoke runbook →</a></p>
         </article>
       </div>
     </section>
 
     <section class="knowledge-band" aria-labelledby="knowledge-title">
       <div class="section-head">
-        <p class="eyebrow">Wiki</p>
-        <h2 id="knowledge-title">Explore Vibe-Trading-KR.</h2>
+        <p class="eyebrow" data-i18n="wiki.eyebrow">Wiki</p>
+        <h2 id="knowledge-title" data-i18n="wiki.title">Explore Vibe-Trading-KR.</h2>
       </div>
       <div class="knowledge-grid">
         <a class="knowledge-card" href="/Vibe-Trading-KR/docs/">
-          <strong>Product Docs</strong>
+          <strong data-i18n="card.docs">Product Docs</strong>
         </a>
         <a class="knowledge-card" href="/Vibe-Trading-KR/tutorials/">
-          <strong>Hands-on AI Quant</strong>
+          <strong data-i18n="card.tutorials">Hands-on AI Quant</strong>
         </a>
         <a class="knowledge-card" href="/Vibe-Trading-KR/alpha-library/">
-          <strong>Alpha Library</strong>
+          <strong data-i18n="card.alpha">Alpha Library</strong>
         </a>
         <a class="knowledge-card" href="/Vibe-Trading-KR/research-lab/">
-          <strong>Research Lab</strong>
+          <strong data-i18n="card.lab">Research Lab</strong>
         </a>
       </div>
     </section>
 
     <section class="workflow" aria-labelledby="workflow-title">
       <div class="section-head">
-        <p class="eyebrow">Research loop</p>
-        <h2 id="workflow-title">Every answer keeps the trail inspectable.</h2>
+        <p class="eyebrow" data-i18n="loop.eyebrow">Research loop</p>
+        <h2 id="workflow-title" data-i18n="loop.title">Every answer keeps the trail inspectable.</h2>
       </div>
       <div class="step-grid">
         <article>
           <span>01</span>
-          <h3>Route</h3>
-          <p>Select skills, data sources, tools, and swarm teams from the request.</p>
+          <h3 data-i18n="loop.route.title">Route</h3>
+          <p data-i18n="loop.route.body">Select skills, data sources, tools, and swarm teams from the request.</p>
         </article>
         <article>
           <span>02</span>
-          <h3>Ground</h3>
-          <p>Fetch market data, documents, URLs, broker journals, or local files at runtime.</p>
+          <h3 data-i18n="loop.ground.title">Ground</h3>
+          <p data-i18n="loop.ground.body">Fetch market data, documents, URLs, broker journals, or local files at runtime.</p>
         </article>
         <article>
           <span>03</span>
-          <h3>Test</h3>
-          <p>Run backtests, factor analysis, options checks, validation, and report generation.</p>
+          <h3 data-i18n="loop.test.title">Test</h3>
+          <p data-i18n="loop.test.body">Run backtests, factor analysis, options checks, validation, and report generation.</p>
         </article>
         <article>
           <span>04</span>
-          <h3>Deliver</h3>
-          <p>Return run cards, exports, reports, tool traces, and caveats for the next session.</p>
+          <h3 data-i18n="loop.deliver.title">Deliver</h3>
+          <p data-i18n="loop.deliver.body">Return run cards, exports, reports, tool traces, and caveats for the next session.</p>
         </article>
       </div>
     </section>
 
     <section class="feature-band" aria-labelledby="features-title">
       <div class="section-head">
-        <p class="eyebrow">Capabilities</p>
-        <h2 id="features-title">Built for finance research, not brokerage execution.</h2>
+        <p class="eyebrow" data-i18n="cap.eyebrow">Capabilities</p>
+        <h2 id="features-title" data-i18n="cap.title">Built for finance research, not brokerage execution.</h2>
       </div>
       <div class="feature-grid">
         <article class="feature-card">
           <img src="/Vibe-Trading-KR/assets/feature-self-improving-trading-agent.png" alt="Self-improving trading agent">
-          <h3>Agent Harness</h3>
-          <p>Persistent memory, session search, editable skills, context compression, and tool-batched research runs.</p>
+          <h3 data-i18n="cap.harness.title">Agent Harness</h3>
+          <p data-i18n="cap.harness.body">Persistent memory, session search, editable skills, context compression, and tool-batched research runs.</p>
         </article>
         <article class="feature-card">
           <img src="/Vibe-Trading-KR/assets/feature-cross-market-data-backtesting.png" alt="Cross-market data and backtesting">
-          <h3>Backtesting</h3>
-          <p>Seven engines across equities, crypto, futures, forex, composites, and options portfolios.</p>
+          <h3 data-i18n="cap.backtest.title">Backtesting</h3>
+          <p data-i18n="cap.backtest.body">Seven engines across equities, crypto, futures, forex, composites, and options portfolios.</p>
         </article>
         <article class="feature-card">
           <img src="/Vibe-Trading-KR/assets/feature-multi-agent-trading-teams.png" alt="Multi-agent trading teams">
-          <h3>Swarm Teams</h3>
-          <p>Investment committee, quant desk, risk review, macro, crypto, and other preset research teams.</p>
+          <h3 data-i18n="cap.swarm.title">Swarm Teams</h3>
+          <p data-i18n="cap.swarm.body">Investment committee, quant desk, risk review, macro, crypto, and other preset research teams.</p>
         </article>
         <article class="feature-card">
           <img src="/Vibe-Trading-KR/assets/feature-shadow-account.png" alt="Shadow Account workflow">
-          <h3>Shadow Account</h3>
-          <p>Parse broker journals, extract implicit rules, run counterfactual backtests, and render audit reports.</p>
+          <h3 data-i18n="cap.shadow.title">Shadow Account</h3>
+          <p data-i18n="cap.shadow.body">Parse broker journals, extract implicit rules, run counterfactual backtests, and render audit reports.</p>
         </article>
       </div>
     </section>
 
     <section class="safety-band" aria-label="Research only">
       <div>
-        <p class="eyebrow">Boundary</p>
-        <h2>No live trading.</h2>
+        <p class="eyebrow" data-i18n="safety.eyebrow">Boundary</p>
+        <h2 data-i18n="safety.title">No live trading.</h2>
       </div>
-      <p>Vibe-Trading is for research, simulation, and backtesting. It does not execute live trades and does not provide investment advice.</p>
+      <p data-i18n="safety.body">Vibe-Trading is for research, simulation, and backtesting. It does not execute live trades and does not provide investment advice.</p>
     </section>
   </main>
 
   <footer class="site-footer">
     <span>Vibe-Trading-KR Wiki</span>
-    <a href="/Vibe-Trading-KR/docs/">Docs</a>
-    <a href="/Vibe-Trading-KR/tutorials/">Tutorials</a>
-    <a href="/Vibe-Trading-KR/alpha-library/">Alpha Library</a>
-    <a href="/Vibe-Trading-KR/research-lab/">Research Lab</a>
+    <a href="/Vibe-Trading-KR/docs/" data-i18n="nav.docs">Docs</a>
+    <a href="/Vibe-Trading-KR/tutorials/" data-i18n="nav.tutorials">Tutorials</a>
+    <a href="/Vibe-Trading-KR/alpha-library/" data-i18n="nav.alpha">Alpha Library</a>
+    <a href="/Vibe-Trading-KR/research-lab/" data-i18n="nav.lab">Research Lab</a>
     <a href="https://github.com/pinehill99/Vibe-Trading-KR">GitHub</a>
     <a href="https://pypi.org/project/vibe-trading-ai/">PyPI</a>
   </footer>

@@ -166,6 +166,23 @@ button {
   cursor: pointer;
 }
 
+.lang-toggle {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lang-toggle:hover {
+  border-color: var(--accent);
+}
+
 .theme-icon {
   width: 16px;
   height: 16px;
