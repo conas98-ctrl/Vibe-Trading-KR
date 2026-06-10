@@ -20,6 +20,7 @@ from src.trading.connectors.kr_common import (
     KoreanConnectorConfig,
     KoreanConnectorConfigError,
     build_config as _build_config,
+    cached_access_token as _cached_access_token,
     check_status as _check_status,
     load_config as _load_config,
     save_config as _save_config,
@@ -1693,6 +1694,10 @@ def _access_token(config: KoreanConnectorConfig, client: Any) -> str:
     missing = _missing_auth_fields(config)
     if missing:
         raise KoreanConnectorConfigError(f"{LABEL} connector not configured: missing {', '.join(missing)}.")
+    return _cached_access_token(config, lambda: _issue_access_token(config, client))
+
+
+def _issue_access_token(config: KoreanConnectorConfig, client: Any) -> tuple[str, float | None]:
     url = config.endpoint.rstrip("/") + KIWOOM_REST_ENDPOINTS["auth_token"]["path"]
     response = client.post(
         url,
@@ -1704,7 +1709,9 @@ def _access_token(config: KoreanConnectorConfig, client: Any) -> str:
     token = str(payload.get("token") or "").strip()
     if not token:
         raise KoreanConnectorConfigError(f"{LABEL} auth token response missing token.")
-    return token
+    # Kiwoom reports an absolute expires_dt rather than a relative TTL; use the
+    # shared default TTL instead of parsing broker-local wall-clock time.
+    return token, None
 
 
 def _headers(token: str, api_id: str) -> dict[str, str]:

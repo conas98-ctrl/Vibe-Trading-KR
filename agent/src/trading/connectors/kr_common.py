@@ -3,15 +3,26 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 PROFILE_ENVIRONMENTS = {
     "paper": "paper",
     "live-readonly": "live",
     "live": "live",
 }
+
+#: Issued OAuth tokens, keyed by (connector, endpoint, app_key). Korean brokers
+#: rate-limit token issuance (KIS allows roughly one issuance per minute and a
+#: re-issue can invalidate the previous token), so issuing per request both
+#: fails fast and can break other clients sharing the same app key.
+_TOKEN_CACHE: dict[tuple[str, str, str], tuple[str, float]] = {}
+_TOKEN_LOCK = threading.Lock()
+TOKEN_SAFETY_MARGIN_SECONDS = 300.0
+DEFAULT_TOKEN_TTL_SECONDS = 6 * 3600.0
 
 
 class KoreanConnectorConfigError(RuntimeError):
@@ -156,6 +167,39 @@ def save_config(path: Path, config: KoreanConnectorConfig) -> Path:
     except OSError:
         pass
     return path
+
+
+def cached_access_token(
+    config: KoreanConnectorConfig,
+    issue: Callable[[], tuple[str, float | None]],
+) -> str:
+    """Return a cached OAuth access token, issuing one only when needed.
+
+    ``issue`` performs the actual token request and returns ``(token,
+    expires_in_seconds | None)``. The token is cached per (connector, endpoint,
+    app_key) until shortly before broker-reported expiry, or for
+    ``DEFAULT_TOKEN_TTL_SECONDS`` when the broker does not report one.
+    """
+    key = (config.connector, config.endpoint, config.app_key)
+    now = time.monotonic()
+    with _TOKEN_LOCK:
+        cached = _TOKEN_CACHE.get(key)
+        if cached and cached[1] > now:
+            return cached[0]
+    token, expires_in = issue()
+    if expires_in is None:
+        ttl = DEFAULT_TOKEN_TTL_SECONDS
+    else:
+        ttl = max(60.0, float(expires_in) - TOKEN_SAFETY_MARGIN_SECONDS)
+    with _TOKEN_LOCK:
+        _TOKEN_CACHE[key] = (token, time.monotonic() + ttl)
+    return token
+
+
+def clear_token_cache() -> None:
+    """Drop every cached broker token (tests and credential rotation)."""
+    with _TOKEN_LOCK:
+        _TOKEN_CACHE.clear()
 
 
 def check_status(config: KoreanConnectorConfig, *, label: str, bridge: bool = False) -> dict[str, Any]:
