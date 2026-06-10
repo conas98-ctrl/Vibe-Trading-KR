@@ -9,3 +9,16 @@ from pathlib import Path
 AGENT_DIR = Path(__file__).resolve().parent.parent
 if str(AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(AGENT_DIR))
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _clear_kr_token_cache():
+    """Keep broker token caching from leaking between tests."""
+    from src.trading.connectors import kr_common
+
+    kr_common.clear_token_cache()
+    yield
+    kr_common.clear_token_cache()

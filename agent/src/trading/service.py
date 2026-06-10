@@ -304,13 +304,15 @@ def _order_classification(connector: str, symbol: str):
         return instrument, AssetClass.US_EQUITY
     if token.startswith(("CN.", "SH.", "SZ.")) or token.endswith((".SH", ".SS", ".SZ")):
         return instrument, AssetClass.CN_EQUITY
-    if (
-        token.startswith(("KR.", "KRX:"))
-        or token.endswith((".KS", ".KQ"))
-        or (token.isdigit() and len(token) == 6)
-    ):
+    if token.startswith(("KR.", "KRX:")) or token.endswith((".KS", ".KQ")):
         return instrument, AssetClass.KR_EQUITY
     if connector == "toss":
+        # Toss trades KRX and US equities only, so a bare 6-digit numeric code
+        # is a KRX issue code. Other multi-market connectors must NOT infer KR
+        # from bare digits — A-share codes are 6-digit numeric too, and an
+        # unknown asset class fail-closes at the gate.
+        if token.isdigit() and len(token) == 6:
+            return instrument, AssetClass.KR_EQUITY
         return instrument, AssetClass.US_EQUITY
     return instrument, None
 
@@ -338,6 +340,10 @@ def place_order(
     """
     profile = profile_by_id(profile_id)
     if profile.transport != "broker_sdk":
+        return _unsupported(profile, "orders.place")
+    # Read-only profiles promise "no writes" in their capability list; enforce
+    # that promise here instead of trusting every connector SDK to re-check.
+    if profile.readonly or not any(cap.startswith("orders.place") for cap in profile.capabilities):
         return _unsupported(profile, "orders.place")
 
     module = _sdk_module(profile.connector)
@@ -396,6 +402,11 @@ def cancel_order(
     """
     profile = profile_by_id(profile_id)
     if profile.transport != "broker_sdk":
+        return _unsupported(profile, "orders.cancel")
+    # Cancels stay open for trade-capable profiles even when the kill switch is
+    # on (risk-reducing), but a read-only profile must never reach the broker's
+    # write surface at all.
+    if profile.readonly:
         return _unsupported(profile, "orders.cancel")
     module = _sdk_module(profile.connector)
     config = module.build_config(profile.config, overrides)
