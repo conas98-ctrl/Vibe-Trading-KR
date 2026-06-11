@@ -31,6 +31,8 @@ _SDK_CONNECTOR_MODULES = {
     "eugene-champion": "src.trading.connectors.eugene_champion.sdk",
     "yuanta-tradar": "src.trading.connectors.yuanta_tradar.sdk",
     "nh-qv": "src.trading.connectors.nh_qv.sdk",
+    "dhan": "src.trading.connectors.dhan.sdk",
+    "shoonya": "src.trading.connectors.shoonya.sdk",
 }
 
 
