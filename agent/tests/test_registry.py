@@ -140,6 +140,13 @@ class TestFallbackChains:
     def test_kr_equity_prefers_official_krx_koscom_then_public_fallbacks(self) -> None:
         assert FALLBACK_CHAINS["kr_equity"] == ["krx", "koscom", "yfinance", "akshare"]
 
+    def test_crypto_chain_includes_yfinance_fallback(self) -> None:
+        """yfinance is the third-tier fallback for crypto when OKX and CCXT fail."""
+        assert "yfinance" in FALLBACK_CHAINS["crypto"]
+        # OKX and CCXT should still be preferred
+        assert FALLBACK_CHAINS["crypto"][:2] == ["okx", "ccxt"]
+        assert FALLBACK_CHAINS["crypto"][-1] == "yfinance"
+
 
 # ---------------------------------------------------------------------------
 # resolve_loader
