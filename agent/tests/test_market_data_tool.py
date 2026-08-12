@@ -146,35 +146,179 @@ def test_explicit_korean_symbol_uses_pykrx_without_market_hint():
     assert len(ohlcv.calls) == 1
 
 
-def test_group_failures_are_isolated_and_fallback_cannot_overwrite_ohlcv():
+class _InfoResolver:
+    def __init__(self, info=None, error=None):
+        self.info = info or {}
+        self.error = error
+        self.calls = []
+
+    def __call__(self, symbol):
+        self.calls.append(symbol)
+        if self.error:
+            raise self.error
+        return self.info
+
+
+def _fundamentals_payload(**values):
+    return {"status": "ok", "data": {"data": [{"날짜": "2025-12-31", **values}]}}
+
+
+def _market_cap_payload(value):
+    return {"status": "ok", "data": {"data": [{"날짜": "2025-12-31", "시가총액": value}]}}
+
+
+def test_pykrx_non_price_fields_succeed_without_yfinance():
+    info = _InfoResolver(error=AssertionError("yfinance must not be called"))
+    tools = {
+        "get_stock_ohlcv": _FakeRemote(_ohlcv_payload()),
+        "get_market_fundamental_by_date": _FakeRemote(
+            _fundamentals_payload(PER=10, PBR=1.5, EPS=5000, BPS=50000)
+        ),
+        "get_market_cap_by_date": _FakeRemote(_market_cap_payload(123_000_000)),
+    }
+    result = fetch_market_data(
+        codes=["005930.KS"], start_date="2025-01-01", end_date="2025-12-31",
+        fields=["ohlcv", "fundamentals", "market_cap"], mcp_tools=tools,
+        yfinance_info_resolver=info, max_rows=0,
+    )["005930.KS"]
+
+    assert info.calls == []
+    assert result["fundamentals"] == {"PER": 10, "PBR": 1.5, "EPS": 5000, "BPS": 50000}
+    assert result["market_cap"] == 123_000_000
+    assert all(
+        item["source"] == "pykrx_mcp"
+        for item in result["provenance"]["fundamentals"]["fields"].values()
+    )
+    assert result["provenance"]["market_cap"]["source"] == "pykrx_mcp"
+
+
+def test_fundamental_fallback_fills_only_missing_fields_and_records_provenance():
+    info = _InfoResolver({
+        "trailingPE": 12, "priceToBook": 2.0, "trailingEps": 6000, "bookValue": 70000,
+    })
+    tools = {
+        "get_stock_ohlcv": _FakeRemote(_ohlcv_payload()),
+        "get_market_fundamental_by_date": _FakeRemote(
+            _fundamentals_payload(PER=None, PBR=1.5, EPS=None, BPS=50000)
+        ),
+    }
+    result = fetch_market_data(
+        codes=["005930.KS"], start_date="2025-01-01", end_date="2025-12-31",
+        fields=["ohlcv", "fundamentals"], mcp_tools=tools,
+        yfinance_info_resolver=info, max_rows=0,
+    )["005930.KS"]
+
+    assert info.calls == ["005930.KS"]
+    assert result["fundamentals"] == {"PER": 12, "PBR": 1.5, "EPS": 6000, "BPS": 50000}
+    fields = result["provenance"]["fundamentals"]["fields"]
+    assert fields["PBR"] == {"source": "pykrx_mcp", "fallback": False, "status": "ok"}
+    assert fields["BPS"]["source"] == "pykrx_mcp"
+    assert fields["PER"]["provider_field"] == "trailingPE"
+    assert fields["PER"]["basis"] == "trailing"
+    assert fields["EPS"]["provider_field"] == "trailingEps"
+    for field in ("PER", "EPS"):
+        assert fields[field]["source"] == "yfinance"
+        assert fields[field]["as_of_type"] == "current_snapshot"
+        assert fields[field]["fallback"] is True
+        assert fields[field]["status"] == "ok"
+        assert fields[field]["primary_failure"]
+
+
+def test_invalid_yfinance_values_remain_unavailable():
+    info = _InfoResolver({
+        "trailingPE": None, "priceToBook": float("nan"),
+        "trailingEps": float("inf"), "bookValue": float("-inf"),
+    })
+    result = fetch_market_data(
+        codes=["005930.KS"], start_date="2025-01-01", end_date="2025-12-31",
+        fields=["fundamentals"],
+        mcp_tools={"get_market_fundamental_by_date": _FakeRemote(_error("fundamental empty"))},
+        yfinance_info_resolver=info,
+    )["005930.KS"]
+
+    assert result["fundamentals"] == {"PER": None, "PBR": None, "EPS": None, "BPS": None}
+    for item in result["provenance"]["fundamentals"]["fields"].values():
+        assert item["source"] == "unavailable"
+        assert item["status"] == "unavailable"
+        assert "fundamental empty" in item["primary_failure"]
+
+
+def test_bare_korean_ticker_does_not_guess_yfinance_board():
+    info = _InfoResolver(error=AssertionError("ambiguous bare ticker must not call yfinance"))
+    result = fetch_market_data(
+        codes=["005930"], start_date="2025-01-01", end_date="2025-12-31", market="kr",
+        fields=["fundamentals", "market_cap"],
+        mcp_tools={
+            "get_market_fundamental_by_date": _FakeRemote(_error("fundamental empty")),
+            "get_market_cap_by_date": _FakeRemote(_error("market cap empty")),
+        },
+        yfinance_info_resolver=info,
+    )["005930"]
+
+    assert info.calls == []
+    assert result["market_cap"] is None
+    assert all(value is None for value in result["fundamentals"].values())
+    assert "board is not explicit" in result["provenance"]["market_cap"]["primary_failure"]
+
+
+def test_group_failures_are_isolated_and_yfinance_price_fields_are_ignored():
     tools = {
         "get_stock_ohlcv": _FakeRemote(_ohlcv_payload()),
         "get_market_fundamental_by_date": _FakeRemote(_error("fundamental empty")),
         "get_market_cap_by_date": _FakeRemote(_error("market cap empty")),
+        "get_market_trading_volume_by_investor": _FakeRemote(_error("investor volume empty")),
         "get_market_trading_value_by_investor": _FakeRemote(_error("investor empty")),
     }
-    fallback_calls = []
-
-    def fallback(**kwargs):
-        fallback_calls.append(kwargs)
-        return {"PER": 10, "close": -1, "volume": -1}
-
-    fallback.source = "test_fallback"
+    info = _InfoResolver({
+        "trailingPE": 12, "priceToBook": 2, "trailingEps": 5000,
+        "bookValue": 60000, "marketCap": 999_000_000,
+        "currentPrice": 999999999, "open": 888888888, "volume": 777777777,
+    })
     result = fetch_market_data(
-        codes=["005930"], start_date="2025-01-01", end_date="2025-12-31", market="kr",
-        mcp_tools=tools, fallback_resolvers={"fundamentals": fallback}, max_rows=0,
-    )["005930"]
-    assert len(fallback_calls) == 1
-    assert result["fundamentals"]["close"] == -1
+        codes=["005930.KS"], start_date="2025-01-01", end_date="2025-12-31",
+        mcp_tools=tools, yfinance_info_resolver=info, max_rows=0,
+    )["005930.KS"]
+    assert info.calls == ["005930.KS"]
+    assert result["fundamentals"] == {"PER": 12, "PBR": 2, "EPS": 5000, "BPS": 60000}
+    assert result["market_cap"] == 999_000_000
     assert result["ohlcv"][-1]["close"] == 221.0
     assert result["ohlcv"][-1]["volume"] == 22000.0
+    assert result["latest_ohlcv"]["close"] == 221.0
+    assert result["latest_ohlcv"]["volume"] == 22000.0
+    assert result["derived"]["ma20"] == pd.Series(range(202, 222), dtype=float).mean()
     assert result["provenance"]["fundamentals"]["fallback"] is True
-    assert "fundamental empty" in result["provenance"]["fundamentals"]["primary_failure"]
-    for group in ("market_cap", "investor_flow"):
-        assert result[group] is None
-        assert result["provenance"][group]["status"] == "unavailable"
-        assert result["provenance"][group]["primary_failure"]
+    assert result["provenance"]["market_cap"] == {
+        "source": "yfinance", "provider_field": "marketCap",
+        "as_of_type": "current_snapshot", "fallback": True, "status": "ok",
+        "primary_failure": "market cap empty",
+    }
+    assert result["investor_flow"] == {"volume": None, "value": None}
+    assert result["provenance"]["investor_flow"]["status"] == "unavailable"
+    assert result["provenance"]["investor_flow"]["fallback"] is False
     assert result["provenance"]["ohlcv"]["source"] == "pykrx_mcp"
+
+
+def test_investor_flow_never_calls_yfinance_and_preserves_partial_pykrx_success():
+    info = _InfoResolver(error=AssertionError("investor flow must not call yfinance"))
+    tools = {
+        "get_stock_ohlcv": _FakeRemote(_ohlcv_payload()),
+        "get_market_trading_volume_by_investor": _FakeRemote(
+            {"status": "ok", "data": {"data": {"외국인": {"순매수": 10}}}}
+        ),
+        "get_market_trading_value_by_investor": _FakeRemote(_error("value unavailable")),
+    }
+    result = fetch_market_data(
+        codes=["005930.KS"], start_date="2025-01-01", end_date="2025-12-31",
+        fields=["ohlcv", "investor_flow"], mcp_tools=tools,
+        yfinance_info_resolver=info,
+    )["005930.KS"]
+
+    assert info.calls == []
+    assert result["investor_flow"]["volume"] == {"외국인": {"순매수": 10}}
+    assert result["investor_flow"]["value"] is None
+    parts = result["provenance"]["investor_flow"]["parts"]
+    assert parts["volume"]["status"] == "ok"
+    assert parts["value"]["status"] == "unavailable"
 
 
 def test_derived_indicators_use_pykrx_close_and_volume():

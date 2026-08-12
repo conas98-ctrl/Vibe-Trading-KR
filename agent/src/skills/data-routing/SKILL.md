@@ -46,6 +46,8 @@ You do NOT need to specify a concrete data source in config.json unless the user
 - If `as_of` or `latest_ohlcv.date` is today, the latest daily bar may still be intraday. Describe `close` as the current price, intraday current price, or provisional close rather than a confirmed close, and treat volume as cumulative intraday volume. In a Korean final answer include: "오늘 데이터는 장중 미완성 일봉일 수 있으며, 현재가·고가·저가·거래량은 장 마감 후 달라질 수 있습니다."
 - MA20/60/120/200, period return, and average volume are computed from that locked pykrx OHLCV.
 - Fundamentals, market cap, and investor flow are independent groups. A failure in one must not replace successful OHLCV or switch other groups away from pykrx.
+- Missing PER/PBR/EPS/BPS fields may use a yfinance current-snapshot fallback only: `trailingPE`, `priceToBook`, `trailingEps`, and `bookValue`, respectively. Market cap may use only `marketCap`. Preserve every valid pykrx field, label Yahoo values `as_of_type=current_snapshot`, and never treat them as historical values.
+- Never read or merge price fields from `Ticker.info`. Investor flow has no yfinance fallback; retain independently successful pykrx volume/value parts and mark failed parts unavailable.
 - If no validated group-specific fallback exists, report the group as unavailable. Never invent values.
 - In the final answer, state the returned provenance for OHLCV, derived indicators, and every fallback/unavailable group.
 
