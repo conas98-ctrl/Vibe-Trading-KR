@@ -13,6 +13,7 @@ description: Data source selection decision tree. Load this skill BEFORE any bac
 | yfinance | US stocks, HK stocks, ETFs | No | Needs Yahoo Finance access | yfinance |
 | okx | Crypto (OKX exchange) | No | Needs okx.com access | okx-market |
 | ccxt | Crypto (100+ exchanges) | No | Needs exchange access | ccxt |
+| pykrx MCP | Korean equities | No KRX_ID/KRX_PW | Configured external MCP | data-routing |
 
 ## Decision Tree
 
@@ -34,6 +35,19 @@ You do NOT need to specify a concrete data source in config.json unless the user
 **Futures**: tushare > akshare
 **Macro / economics**: akshare > tushare
 **Forex**: akshare > yfinance
+
+### Korean equities (analysis / research only)
+
+- Call `get_market_data(..., market="kr")`. The hint is required for a bare six-digit ticker because it can collide with an A-share code.
+- Explicit Korean forms are `005930.KS`, `035720.KQ`, `KRX:005930`, `KOSPI:005930`, and `KOSDAQ:035720`.
+- Price, OHLCV, and volume use the configured pykrx MCP `get_stock_ohlcv` tool first.
+- Successful pykrx OHLCV is source-locked: do not query yfinance, akshare, Tushare, Naver, or another provider for the same price bars.
+- After a successful Korean `get_market_data` response whose OHLCV provenance is `pykrx_mcp`, reuse its `as_of`, `latest_ohlcv`, OHLCV, and derived values. Do not call raw `mcp_pykrx_get_stock_ohlcv` again for that analysis, including when fundamentals, market cap, or investor flow is unavailable.
+- If `as_of` or `latest_ohlcv.date` is today, the latest daily bar may still be intraday. Describe `close` as the current price, intraday current price, or provisional close rather than a confirmed close, and treat volume as cumulative intraday volume. In a Korean final answer include: "오늘 데이터는 장중 미완성 일봉일 수 있으며, 현재가·고가·저가·거래량은 장 마감 후 달라질 수 있습니다."
+- MA20/60/120/200, period return, and average volume are computed from that locked pykrx OHLCV.
+- Fundamentals, market cap, and investor flow are independent groups. A failure in one must not replace successful OHLCV or switch other groups away from pykrx.
+- If no validated group-specific fallback exists, report the group as unavailable. Never invent values.
+- In the final answer, state the returned provenance for OHLCV, derived indicators, and every fallback/unavailable group.
 
 3. Load the corresponding skill for API details: `load_skill("akshare")`
 

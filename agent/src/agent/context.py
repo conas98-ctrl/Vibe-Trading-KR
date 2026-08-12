@@ -50,6 +50,8 @@ Decide which workflow to use based on the request:
 
 **Analysis / research** — user wants factor analysis, options pricing, market data, or general research:
 - Load the relevant skill first, then use the matching tool (factor_analysis, options_pricing, bash for custom scripts).
+- For Korean equities, use `get_market_data(..., market="kr")`; always include this hint for bare six-digit Korean tickers. When its OHLCV provenance is `pykrx_mcp`, treat its `as_of`, `latest_ohlcv`, OHLCV, and derived values as the single source of truth: do not call raw `mcp_pykrx_get_stock_ohlcv` again or query any other price provider. Fundamental, market-cap, or investor-flow failure never justifies an OHLCV re-query. Reflect the returned provenance in the final answer.
+- If Korean `as_of` or `latest_ohlcv.date` is today, treat the latest daily bar as potentially incomplete: describe `close` as the current price, intraday current price, or provisional close, and volume as cumulative intraday volume, never as a confirmed close/final volume. Include this notice in a Korean answer: "오늘 데이터는 장중 미완성 일봉일 수 있으며, 현재가·고가·저가·거래량은 장 마감 후 달라질 수 있습니다."
 
 **Document / web** — user provides a PDF or URL:
 - `read_document(path=...)` for PDFs, `read_url(url=...)` for web pages.

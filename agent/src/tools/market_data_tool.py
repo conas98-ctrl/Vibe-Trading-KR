@@ -14,6 +14,10 @@ class MarketDataTool(BaseTool):
     name = "get_market_data"
     description = (
         "Fetch normalized OHLCV market data through the repository loader layer. "
+        "For Korean equities, pass market=kr; configured pykrx MCP OHLCV is primary "
+        "and successful price bars are source-locked against other providers. Its "
+        "as_of/latest_ohlcv/derived/provenance summary is authoritative; do not call "
+        "raw pykrx OHLCV again after success. "
         "Use this for stock, ETF, index, or crypto price bars before writing raw "
         "yfinance/OKX/Tushare scripts."
     )
@@ -38,6 +42,20 @@ class MarketDataTool(BaseTool):
                 "description": "Data source: auto, yfinance, okx, tushare, akshare, or ccxt.",
                 "default": "auto",
             },
+            "market": {
+                "type": "string",
+                "enum": ["auto", "kr"],
+                "description": "Market hint. Use kr for a bare six-digit Korean ticker.",
+                "default": "auto",
+            },
+            "fields": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["ohlcv", "derived", "fundamentals", "market_cap", "investor_flow"],
+                },
+                "description": "Optional Korean analysis groups; OHLCV is always fetched first.",
+            },
             "interval": {
                 "type": "string",
                 "description": "Bar size, e.g. 1D, 1H, 4H, 30m.",
@@ -60,4 +78,6 @@ class MarketDataTool(BaseTool):
             source=kwargs.get("source", "auto"),
             interval=kwargs.get("interval", "1D"),
             max_rows=kwargs.get("max_rows", DEFAULT_MAX_ROWS),
+            market=kwargs.get("market", "auto"),
+            fields=kwargs.get("fields"),
         )
