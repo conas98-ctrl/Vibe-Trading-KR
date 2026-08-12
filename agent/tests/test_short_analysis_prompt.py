@@ -26,7 +26,28 @@ def test_expands_samsung_short_prompt_into_standard_korean_analysis_mode():
     assert "주문 또는 증권사 API는 사용하지 않는다" in expanded
     assert "사실성 정책" in expanded
     assert "점수 분리/산정 보류 정책" in expanded
-    assert "요약, 시장데이터/기술 분석" in expanded
+    assert "한줄 종합판단" in expanded
+
+
+def test_short_prompt_requires_concise_auditable_output_contract():
+    expanded = expand_short_analysis_prompt("005930.KS 종합 분석")
+
+    for heading in (
+        "한줄 종합판단", "핵심 시장데이터", "밸류에이션/시총", "투자자 수급",
+        "시장데이터 기반 기술·밸류에이션 점수", "완전한 장기투자 종합점수",
+        "Provenance / unavailable 요약",
+    ):
+        assert heading in expanded
+    for field in (
+        "return_1w/1m/3m/6m", "period_return", "MA20/60/120/200",
+        "volatility_annualized", "volume_average_20d/60d/120d",
+        "period_volume_average",
+    ):
+        assert field in expanded
+    assert "평가 커버리지" in expanded
+    assert "미평가 항목" in expanded
+    assert "완전한 장기투자 종합점수: 산정 보류" in expanded
+    assert "장황한 일반론" in expanded
 
 
 def test_expands_bare_korean_ticker_and_compact_intent():
@@ -54,6 +75,9 @@ def test_does_not_expand_detailed_or_unrelated_prompts():
 
     for prompt in prompts:
         assert expand_short_analysis_prompt(prompt) == prompt
+
+    detailed = "005930.KS 종합 분석하되 HBM 뉴스와 최근 실적을 자세히 조사해줘"
+    assert "한줄 종합판단" not in expand_short_analysis_prompt(detailed)
 
 
 def test_samsung_short_prompt_smoke_reaches_final_agent_message():

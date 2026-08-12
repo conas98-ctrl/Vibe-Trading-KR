@@ -17,6 +17,7 @@ from typing import Any, Callable
 import pytest
 
 from src.agent.loop import AgentLoop
+from src.agent.trace import TraceWriter
 
 
 class _StubLLMResponse:
@@ -179,3 +180,50 @@ def test_force_text_only_on_last_iteration(tmp_path: Path) -> None:
     assert result["status"] == "success"
     assert "Final answer" in result["content"]
     assert result["iterations"] == 5
+
+
+class _StubLLMPolicyAnswer:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+    def stream_chat(self, messages, tools=None, on_text_chunk=None):
+        response = _StubLLMResponse()
+        response.content = self.content
+        return response
+
+    def chat(self, messages, **kwargs):
+        return _StubLLMResponse()
+
+
+@pytest.mark.parametrize("padding, truncated", [(0, False), (2_100, True)])
+def test_answer_audit_preserves_full_result_and_truncated_trace(
+    tmp_path: Path, padding: int, truncated: bool,
+) -> None:
+    content = (
+        "시장데이터 기반 기술·밸류에이션 점수: 68/100\n"
+        "평가 커버리지: 75/100 배점\n"
+        "미평가 항목: investor flow\n"
+        "완전한 장기투자 종합점수: 산정 보류\n"
+        "Provenance: pykrx_mcp\n"
+        "Investor flow: unavailable\n"
+        + ("x" * padding)
+    )
+    run_dir = tmp_path / "run"
+    agent = _build_agent(_StubLLMPolicyAnswer(content), tmp_run_dir=run_dir)
+
+    result = agent.run(user_message="005930.KS 종합 분석")
+    events = TraceWriter.read(run_dir)
+    answer = next(event for event in events if event["type"] == "answer")
+    audit = next(event for event in events if event["type"] == "answer_audit")
+
+    assert result["content"] == content
+    assert answer["content"] == content[:2_000]
+    assert audit["answer_chars"] == len(content)
+    assert audit["answer_trace_limit"] == 2_000
+    assert audit["answer_trace_truncated"] is truncated
+    assert audit["market_data_score_present"] is True
+    assert audit["coverage_present"] is True
+    assert audit["unevaluated_items_present"] is True
+    assert audit["long_term_score_deferred"] is True
+    assert audit["provenance_present"] is True
+    assert audit["unavailable_present"] is True

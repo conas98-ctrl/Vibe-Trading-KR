@@ -40,6 +40,7 @@ RUNS_DIR = Path(__file__).resolve().parents[2] / "runs"
 TOKEN_THRESHOLD = int(os.getenv("TOKEN_THRESHOLD", "40000"))
 KEEP_RECENT = 3
 TOOL_RESULT_LIMIT = 10_000
+ANSWER_TRACE_LIMIT = 2_000
 HEARTBEAT_INTERVAL_S = float(os.getenv("VT_HEARTBEAT_INTERVAL_S", "3.0"))
 GOAL_MAX_CONTINUATIONS = int(os.getenv("VIBE_TRADING_GOAL_MAX_CONTINUATIONS", "3"))
 
@@ -54,6 +55,24 @@ COLLAPSE_TAIL = 500
 TAIL_TOKEN_BUDGET = 20_000
 
 logger = logging.getLogger(__name__)
+
+
+def _answer_audit(content: str) -> dict[str, Any]:
+    """Return small deterministic metadata for final-answer policy auditing."""
+    return {
+        "type": "answer_audit",
+        "answer_chars": len(content),
+        "answer_trace_limit": ANSWER_TRACE_LIMIT,
+        "answer_trace_truncated": len(content) > ANSWER_TRACE_LIMIT,
+        "market_data_score_present": "시장데이터 기반 기술·밸류에이션 점수" in content,
+        "coverage_present": "평가 커버리지" in content,
+        "unevaluated_items_present": "미평가 항목" in content,
+        "long_term_score_deferred": (
+            "완전한 장기투자 종합점수" in content and "산정 보류" in content
+        ),
+        "provenance_present": "provenance" in content.lower(),
+        "unavailable_present": "unavailable" in content.lower(),
+    }
 
 
 def estimate_tokens(messages: list) -> int:
@@ -571,7 +590,11 @@ class AgentLoop:
                             goal_continuations += 1
                             continue
 
-                    trace.write({"type": "answer", "iter": iteration, "content": final_content[:2000]})
+                    trace.write({
+                        "type": "answer", "iter": iteration,
+                        "content": final_content[:ANSWER_TRACE_LIMIT],
+                    })
+                    trace.write({**_answer_audit(final_content), "iter": iteration})
                     react_trace.append({"type": "answer", "content": final_content[:500]})
                     break
 
