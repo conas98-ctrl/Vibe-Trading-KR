@@ -185,12 +185,35 @@ def _derived_from_pykrx(
 ) -> dict[str, Any]:
     latest: dict[str, Any] = {}
     provenance: dict[str, Any] = {}
+    computed_from_close = {
+        "source": "computed", "computed_from": "ohlcv.close",
+        "upstream_source": "pykrx_mcp",
+    }
+    computed_from_volume = {
+        "source": "computed", "computed_from": "ohlcv.volume",
+        "upstream_source": "pykrx_mcp",
+    }
     for window in KR_DERIVED_WINDOWS:
         name = f"ma{window}"
         latest[name] = _json_safe(frame["close"].rolling(window).mean().iloc[-1])
-        provenance[name] = {
-            "source": "computed", "computed_from": "ohlcv.close", "upstream_source": "pykrx_mcp"
-        }
+        provenance[name] = dict(computed_from_close)
+
+    latest_date = frame.index[-1]
+    return_anchors = {
+        "return_1w": latest_date - pd.Timedelta(days=7),
+        "return_1m": latest_date - pd.DateOffset(months=1),
+        "return_3m": latest_date - pd.DateOffset(months=3),
+        "return_6m": latest_date - pd.DateOffset(months=6),
+    }
+    for name, anchor in return_anchors.items():
+        history = frame.loc[frame.index <= anchor, "close"]
+        latest[name] = (
+            _json_safe(frame["close"].iloc[-1] / history.iloc[-1] - 1)
+            if not history.empty
+            else None
+        )
+        provenance[name] = dict(computed_from_close)
+
     requested_frame = frame.loc[
         (frame.index >= pd.Timestamp(requested_start))
         & (frame.index <= pd.Timestamp(requested_end))
@@ -200,12 +223,30 @@ def _derived_from_pykrx(
         if len(requested_frame) > 1
         else None
     )
-    latest["volume_average"] = _json_safe(frame["volume"].mean())
-    provenance["period_return"] = {
-        "source": "computed", "computed_from": "ohlcv.close", "upstream_source": "pykrx_mcp"
-    }
+    provenance["period_return"] = dict(computed_from_close)
+
+    for window in (20, 60, 120):
+        name = f"volume_average_{window}d"
+        latest[name] = _json_safe(frame["volume"].rolling(window).mean().iloc[-1])
+        provenance[name] = dict(computed_from_volume)
+    period_volume_average = (
+        _json_safe(requested_frame["volume"].mean()) if not requested_frame.empty else None
+    )
+    latest["period_volume_average"] = period_volume_average
+    latest["volume_average"] = period_volume_average
+    provenance["period_volume_average"] = dict(computed_from_volume)
     provenance["volume_average"] = {
-        "source": "computed", "computed_from": "ohlcv.volume", "upstream_source": "pykrx_mcp"
+        **computed_from_volume, "alias_of": "period_volume_average",
+    }
+
+    daily_returns = requested_frame["close"].pct_change().dropna()
+    latest["volatility_annualized"] = _json_safe(
+        daily_returns.std(ddof=1) * math.sqrt(252)
+    )
+    provenance["volatility_annualized"] = {
+        "source": "computed", "computed_from": "ohlcv.close.pct_change",
+        "upstream_source": "pykrx_mcp", "annualization_factor": 252,
+        "estimator": "sample_std",
     }
     return {"values": latest, "provenance": provenance}
 
