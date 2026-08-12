@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -15,6 +16,36 @@ if TYPE_CHECKING:
     from src.memory.persistent import PersistentMemory
 
 logger = logging.getLogger(__name__)
+
+_KR_COMPREHENSIVE_ANALYSIS_RE = re.compile(
+    r"^\s*(?P<symbol>\d{6}(?:\.(?:KS|KQ))?)\s+(?:종합\s*분석|종목\s*분석)\s*[.!?]?\s*$",
+    re.IGNORECASE,
+)
+
+_KR_COMPREHENSIVE_ANALYSIS_TEMPLATE = """{original}
+
+[자동 확장: 한국 주식 표준 종합 분석]
+- 대상 종목: {symbol}
+- 일봉 MA200과 6개월 수익률까지 계산 가능한 충분한 시작일을 정하고, 이번 종합 분석에 필요한 전체 기간과 `fields=["ohlcv", "derived", "fundamentals", "market_cap", "investor_flow"]`를 단 한 번의 `get_market_data(..., market="kr")` 호출로 요청한다.
+- 가격·OHLCV·derived 값에는 기존 pykrx source-lock 정책을 그대로 적용하고, 반환된 중앙 derived 값을 재사용한다.
+- 현재가와 기준일, MA20/60/120/200, 1주/1개월/3개월/6개월/요청기간 수익률, 20/60/120일 및 요청기간 평균 거래량, 변동성, PER/PBR/EPS/BPS, 시가총액, investor flow를 분석한다. 조회 실패나 반환되지 않은 값은 unavailable로 표시한다.
+- OHLCV·derived·fundamentals·시가총액·investor flow 각각의 provenance를 명시한다.
+- 기업·실적·재무·산업·뉴스·공시 정보는 이번 실행에서 실제 확보된 근거만 사용한다. yfinance는 기존 non-price fallback 범위에서만 사용한다.
+- 주문 또는 증권사 API는 사용하지 않는다.
+- 출력은 요약, 시장데이터/기술 분석, 밸류에이션·수급, 기업·실적·뉴스 근거, 리스크, 점수·평가범위·미평가 항목, 결론 순서의 한국어 보고서로 작성한다.
+- 기존 사실성 정책과 점수 분리/산정 보류 정책을 모두 준수한다."""
+
+
+def expand_short_analysis_prompt(user_message: str) -> str:
+    """Expand a terse Korean-equity analysis request into the standard mode."""
+    match = _KR_COMPREHENSIVE_ANALYSIS_RE.fullmatch(user_message)
+    if not match:
+        return user_message
+    symbol = match.group("symbol").upper()
+    return _KR_COMPREHENSIVE_ANALYSIS_TEMPLATE.format(
+        original=user_message.strip(),
+        symbol=symbol,
+    )
 
 _SYSTEM_PROMPT = """You are a finance research agent with {skill_count} specialist skills, {tool_count} tools, 7 data sources (with auto-fallback), and 29 multi-agent swarm teams.
 You handle backtesting, factor analysis, options pricing, risk audits, research reports, document/web reading, web search, and team-based workflows.
@@ -179,7 +210,7 @@ class ContextBuilder:
             messages.extend(history)
 
         # Auto-recall: inject relevant memories into user message
-        enriched = user_message
+        enriched = expand_short_analysis_prompt(user_message)
         if self._persistent_memory:
             try:
                 recalls = self._persistent_memory.find_relevant(user_message, max_results=3)
@@ -188,7 +219,7 @@ class ContextBuilder:
                     recall_block = "\n".join(lines)
                     enriched = (
                         f"<recalled-memories>\n{recall_block}\n</recalled-memories>\n\n"
-                        f"{user_message}"
+                        f"{enriched}"
                     )
             except Exception as exc:
                 logger.debug("Auto-recall failed: %s", exc)
