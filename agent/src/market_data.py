@@ -87,6 +87,28 @@ def _call_remote_tool(tool: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _unwrap_analysis_bundle(payload: dict[str, Any]) -> dict[str, Any]:
+    """Extract the pykrx single-session analysis bundle from an MCP payload."""
+    if payload.get("status") == "error" or payload.get("isError") is True:
+        raise ValueError(str(payload.get("error") or payload.get("text") or "pykrx MCP error"))
+    candidates: list[Any] = [payload.get("structured_content"), payload.get("data"), payload]
+    text = payload.get("text")
+    if isinstance(text, str):
+        try:
+            candidates.append(json.loads(text))
+        except json.JSONDecodeError:
+            pass
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        nested = candidate.get("result")
+        if isinstance(nested, dict):
+            candidate = nested
+        if isinstance(candidate.get("ohlcv"), dict):
+            return candidate
+    raise ValueError("pykrx MCP returned no analysis bundle")
+
+
 def _unwrap_mcp_data(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("status") == "error" or payload.get("isError") is True:
         raise ValueError(str(payload.get("error") or payload.get("text") or "pykrx MCP error"))
@@ -343,6 +365,8 @@ def fetch_korean_market_data(
         ohlcv_output: list[dict[str, Any]] | dict[str, object] | None = None
         yahoo_info: dict[str, Any] | None = None
         yahoo_error: str | None = None
+        bundle: dict[str, Any] | None = None
+        bundle_tool = tools.get("get_stock_analysis_bundle")
 
         def get_yfinance_info_once() -> dict[str, Any] | None:
             nonlocal yahoo_info, yahoo_error
@@ -361,15 +385,21 @@ def fetch_korean_market_data(
                 yahoo_error = str(exc)
             return yahoo_info
         try:
-            tool = tools.get("get_stock_ohlcv")
-            if tool is None:
-                raise ValueError("configured pykrx MCP does not expose get_stock_ohlcv")
             requested_start = pd.Timestamp(start_date)
             expanded_start = min(requested_start, pd.Timestamp(end_date) - timedelta(days=400))
-            payload = _call_remote_tool(tool, {
+            arguments = {
                 "ticker": ticker, "start_date": expanded_start.strftime("%Y%m%d"),
                 "end_date": pd.Timestamp(end_date).strftime("%Y%m%d"), "adjusted": True,
-            })
+            }
+            if bundle_tool is not None:
+                arguments["fields"] = sorted(requested - {"derived"})
+                bundle = _unwrap_analysis_bundle(_call_remote_tool(bundle_tool, arguments))
+                payload = bundle["ohlcv"]
+            else:
+                tool = tools.get("get_stock_ohlcv")
+                if tool is None:
+                    raise ValueError("configured pykrx MCP does not expose get_stock_ohlcv")
+                payload = _call_remote_tool(tool, arguments)
             ohlcv_frame = _normalize_pykrx_ohlcv(payload)
             records = [
                 {key: _json_safe(value) for key, value in row.items()}
@@ -401,13 +431,16 @@ def fetch_korean_market_data(
             field_provenance: dict[str, dict[str, Any]] = {}
             primary_failure = ""
             try:
-                tool = tools.get("get_market_fundamental_by_date")
-                if tool is None:
-                    raise ValueError("configured pykrx MCP does not expose get_market_fundamental_by_date")
-                body = _unwrap_mcp_data(_call_remote_tool(tool, {
-                    "ticker": ticker, "start_date": pd.Timestamp(start_date).strftime("%Y%m%d"),
-                    "end_date": pd.Timestamp(end_date).strftime("%Y%m%d"),
-                }))
+                if bundle is not None:
+                    body = _unwrap_mcp_data(bundle["fundamentals"])
+                else:
+                    tool = tools.get("get_market_fundamental_by_date")
+                    if tool is None:
+                        raise ValueError("configured pykrx MCP does not expose get_market_fundamental_by_date")
+                    body = _unwrap_mcp_data(_call_remote_tool(tool, {
+                        "ticker": ticker, "start_date": pd.Timestamp(start_date).strftime("%Y%m%d"),
+                        "end_date": pd.Timestamp(end_date).strftime("%Y%m%d"),
+                    }))
                 row = _latest_row(body)
             except Exception as exc:
                 row = {}
@@ -451,13 +484,16 @@ def fetch_korean_market_data(
             market_cap_value: float | None = None
             primary_failure = ""
             try:
-                tool = tools.get("get_market_cap_by_date")
-                if tool is None:
-                    raise ValueError("configured pykrx MCP does not expose get_market_cap_by_date")
-                body = _unwrap_mcp_data(_call_remote_tool(tool, {
-                    "ticker": ticker, "start_date": pd.Timestamp(start_date).strftime("%Y%m%d"),
-                    "end_date": pd.Timestamp(end_date).strftime("%Y%m%d"),
-                }))
+                if bundle is not None:
+                    body = _unwrap_mcp_data(bundle["market_cap"])
+                else:
+                    tool = tools.get("get_market_cap_by_date")
+                    if tool is None:
+                        raise ValueError("configured pykrx MCP does not expose get_market_cap_by_date")
+                    body = _unwrap_mcp_data(_call_remote_tool(tool, {
+                        "ticker": ticker, "start_date": pd.Timestamp(start_date).strftime("%Y%m%d"),
+                        "end_date": pd.Timestamp(end_date).strftime("%Y%m%d"),
+                    }))
                 market_cap_value = _pick_number(_latest_row(body), "market_cap", "시가총액")
                 if market_cap_value is None:
                     raise ValueError("pykrx returned no valid market cap")
@@ -492,13 +528,16 @@ def fetch_korean_market_data(
                 ("value", "get_market_trading_value_by_investor"),
             ):
                 try:
-                    tool = tools.get(remote_name)
-                    if tool is None:
-                        raise ValueError(f"configured pykrx MCP does not expose {remote_name}")
-                    flow_result[kind] = _unwrap_mcp_mapping(_call_remote_tool(tool, {
-                        "ticker": ticker, "start_date": pd.Timestamp(start_date).strftime("%Y%m%d"),
-                        "end_date": pd.Timestamp(end_date).strftime("%Y%m%d"),
-                    }))
+                    if bundle is not None:
+                        flow_result[kind] = _unwrap_mcp_mapping(bundle[f"investor_{kind}"])
+                    else:
+                        tool = tools.get(remote_name)
+                        if tool is None:
+                            raise ValueError(f"configured pykrx MCP does not expose {remote_name}")
+                        flow_result[kind] = _unwrap_mcp_mapping(_call_remote_tool(tool, {
+                            "ticker": ticker, "start_date": pd.Timestamp(start_date).strftime("%Y%m%d"),
+                            "end_date": pd.Timestamp(end_date).strftime("%Y%m%d"),
+                        }))
                     flow_provenance[kind] = {
                         "source": "pykrx_mcp", "fallback": False, "status": "ok",
                     }

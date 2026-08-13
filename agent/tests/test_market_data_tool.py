@@ -167,6 +167,38 @@ def _market_cap_payload(value):
     return {"status": "ok", "data": {"data": [{"날짜": "2025-12-31", "시가총액": value}]}}
 
 
+def test_single_session_bundle_is_called_once_and_preserves_source_lock():
+    bundle = _FakeRemote({
+        "status": "ok",
+        "data": {
+            "ohlcv": _ohlcv_payload(),
+            "fundamentals": _fundamentals_payload(PER=10, PBR=1.5, EPS=5000, BPS=50000),
+            "market_cap": _market_cap_payload(123_000_000),
+            "investor_volume": {"data": {"data": {"foreign": {"sell": 1, "buy": 2, "net": 1}}}},
+            "investor_value": {"data": {"data": {"foreign": {"sell": 10, "buy": 20, "net": 10}}}},
+        },
+    })
+    info = _InfoResolver(error=AssertionError("yfinance must not be called"))
+    result = fetch_market_data(
+        codes=["005930.KS"], start_date="2025-01-01", end_date="2025-12-31",
+        fields=["ohlcv", "derived", "fundamentals", "market_cap", "investor_flow"],
+        mcp_tools={"get_stock_analysis_bundle": bundle},
+        yfinance_info_resolver=info,
+    )["005930.KS"]
+
+    assert len(bundle.calls) == 1
+    assert bundle.calls[0]["fields"] == [
+        "fundamentals", "investor_flow", "market_cap", "ohlcv"
+    ]
+    assert info.calls == []
+    assert result["provenance"]["ohlcv"]["source"] == "pykrx_mcp"
+    assert result["provenance"]["fundamentals"]["source"] == "pykrx_mcp"
+    assert result["provenance"]["market_cap"]["source"] == "pykrx_mcp"
+    assert result["provenance"]["investor_flow"]["source"] == "pykrx_mcp"
+    assert result["investor_flow"]["volume"]["foreign"]["net"] == 1
+    assert result["investor_flow"]["value"]["foreign"]["net"] == 10
+
+
 def test_pykrx_non_price_fields_succeed_without_yfinance():
     info = _InfoResolver(error=AssertionError("yfinance must not be called"))
     tools = {
