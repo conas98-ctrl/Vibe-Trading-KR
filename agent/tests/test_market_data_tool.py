@@ -199,6 +199,46 @@ def test_single_session_bundle_is_called_once_and_preserves_source_lock():
     assert result["investor_flow"]["value"]["foreign"]["net"] == 10
 
 
+def test_bundle_preserves_all_investor_types_and_flow_columns():
+    investor_types = [
+        "금융투자", "보험", "투신", "사모", "은행", "기타금융", "연기금",
+        "기관합계", "기타법인", "개인", "외국인", "기타외국인", "전체",
+    ]
+    volume = {
+        name: {"매도": index, "매수": index + 1, "순매수": 1}
+        for index, name in enumerate(investor_types, start=1)
+    }
+    value = {
+        name: {"매도": index * 10, "매수": index * 10 + 5, "순매수": 5}
+        for index, name in enumerate(investor_types, start=1)
+    }
+    bundle = _FakeRemote({
+        "status": "ok",
+        "data": {
+            "ohlcv": _ohlcv_payload(),
+            "investor_volume": {"data": {"data": volume}},
+            "investor_value": {"data": {"data": value}},
+        },
+    })
+
+    result = fetch_market_data(
+        codes=["005930.KS"], start_date="2025-01-01", end_date="2025-12-31",
+        fields=["ohlcv", "investor_flow"],
+        mcp_tools={"get_stock_analysis_bundle": bundle},
+        yfinance_info_resolver=_InfoResolver(
+            error=AssertionError("investor flow must not call yfinance")
+        ),
+    )["005930.KS"]
+
+    assert list(result["investor_flow"]["volume"]) == investor_types
+    assert list(result["investor_flow"]["value"]) == investor_types
+    for kind in ("volume", "value"):
+        assert set(result["investor_flow"][kind]["외국인"]) == {"매도", "매수", "순매수"}
+        assert result["provenance"]["investor_flow"]["parts"][kind] == {
+            "source": "pykrx_mcp", "fallback": False, "status": "ok",
+        }
+
+
 def test_pykrx_non_price_fields_succeed_without_yfinance():
     info = _InfoResolver(error=AssertionError("yfinance must not be called"))
     tools = {
